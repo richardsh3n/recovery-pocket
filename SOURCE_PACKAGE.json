@@ -1,7 +1,12 @@
 {
   "snapshotDate": "2026-10-06",
   "visibility": "private",
-  "files": 34,
+  "files": 35,
   "excludedPersonalData": true,
-  "history": "Clean source snapshot; original local history preserved separately"
+  "history": "Clean source snapshot; original local history preserved separately",
+  "verification": {
+    "syntheticCoreChecks": "110 passed",
+    "iOSSimulatorBuild": "BUILD SUCCEEDED",
+    "realWatchAcceptance": "pending"
+  }
 }
