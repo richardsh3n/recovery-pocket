@@ -1,0 +1,110 @@
+[
+  {
+    "repository": "pushorpause/algorithm",
+    "checkedAt": "2026-10-03",
+    "branch": "main",
+    "treeSHA": "2ea3e8095f77c8643cd7993282af2852f446f677",
+    "licenseMetadata": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "starsAtReview": 0,
+    "lastPush": "2026-07-15T06:20:01Z"
+  },
+  {
+    "repository": "W4rd2/whoordan",
+    "checkedAt": "2026-10-03",
+    "branch": "main",
+    "treeSHA": "1179329287e67b7b7fde334200e47302607844e9",
+    "licenseMetadata": {
+      "key": "apache-2.0",
+      "name": "Apache License 2.0",
+      "spdx_id": "Apache-2.0",
+      "url": "https://api.github.com/licenses/apache-2.0",
+      "node_id": "MDc6TGljZW5zZTI="
+    },
+    "starsAtReview": 1,
+    "lastPush": "2026-06-05T20:30:35Z"
+  },
+  {
+    "repository": "heisenbuggs/Soma",
+    "checkedAt": "2026-10-03",
+    "branch": "main",
+    "treeSHA": "f09348665f5ec156a2c6ac185bc1650f4b465752",
+    "licenseMetadata": null,
+    "starsAtReview": 2,
+    "lastPush": "2026-06-22T05:16:37Z"
+  },
+  {
+    "repository": "synheart-ai/synheart-wear-swift",
+    "checkedAt": "2026-10-03",
+    "branch": "main",
+    "treeSHA": null,
+    "licenseMetadata": {
+      "key": "other",
+      "name": "Other",
+      "spdx_id": "NOASSERTION",
+      "url": null,
+      "node_id": "MDc6TGljZW5zZTA="
+    },
+    "starsAtReview": 0,
+    "lastPush": "2026-06-03T23:10:44Z"
+  },
+  {
+    "repository": "gitisabel/garmin-health-monitor",
+    "checkedAt": "2026-10-03",
+    "branch": "main",
+    "treeSHA": null,
+    "licenseMetadata": null,
+    "starsAtReview": 0,
+    "lastPush": "2026-03-21T16:31:13Z"
+  },
+  {
+    "repository": "paulvangentcom/heartrate_analysis_python",
+    "checkedAt": "2026-10-03",
+    "branch": "master",
+    "treeSHA": null,
+    "licenseMetadata": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "starsAtReview": 1148,
+    "lastPush": "2025-12-30T14:20:41Z"
+  },
+  {
+    "repository": "PGomes92/pyhrv",
+    "checkedAt": "2026-10-03",
+    "branch": "master",
+    "treeSHA": null,
+    "licenseMetadata": {
+      "key": "bsd-3-clause",
+      "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+      "spdx_id": "BSD-3-Clause",
+      "url": "https://api.github.com/licenses/bsd-3-clause",
+      "node_id": "MDc6TGljZW5zZTU="
+    },
+    "starsAtReview": 341,
+    "lastPush": "2026-06-17T13:17:36Z"
+  },
+  {
+    "repository": "rlabbe/filterpy",
+    "checkedAt": "2026-10-03",
+    "branch": "master",
+    "treeSHA": null,
+    "licenseMetadata": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "starsAtReview": 3877,
+    "lastPush": "2024-02-07T10:05:31Z"
+  }
+]

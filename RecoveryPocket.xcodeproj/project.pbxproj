@@ -1,0 +1,633 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		005048F28D97559F876E0857 /* RecoveryPocket/RecoveryModelV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 839C0C788BF84861B2DC6D75 /* RecoveryPocket/RecoveryModelV2.swift */; };
+		03FE567F41B0D88AE9463924 /* Shared/StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523434939763782ED4FBA458 /* Shared/StatusStore.swift */; };
+		0828B99B1ECEA28C5E5DABCE /* WatchWidgets.appex in Embed WatchWidgets */ = {isa = PBXBuildFile; fileRef = 5F7C3FF908DC8A02906EBD7C /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1326DD4B852006877BD419CA /* Shared/BatteryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */; };
+		194A7CCA4F13CF008DE83F2D /* RecoveryPocket/RecoveryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91323CFCA37C4B9F6D1EAF82 /* RecoveryPocket/RecoveryEngine.swift */; };
+		337D58D7B0992EC31D38DCBE /* RecoveryPocket/BatteryHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977D13A95C8A7DEF52C4CF0D /* RecoveryPocket/BatteryHome.swift */; };
+		357EFE1D486781BC42FB667A /* RecoveryPocket/RecoveryPocketApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE05B3AE58AE3B7EC0A4FB27 /* RecoveryPocket/RecoveryPocketApp.swift */; };
+		5AC7C54E71F9D6DD55CD798C /* RecoveryPocket/HealthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC4F3D4A92896D4EBD1517B1 /* RecoveryPocket/HealthStore.swift */; };
+		5C4926D90F2E992E9DD30DF2 /* WatchApp/WatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9F2807905A670B02163ABCD /* WatchApp/WatchApp.swift */; };
+		6604D0BD1166C9D5D3D4B875 /* Shared/StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523434939763782ED4FBA458 /* Shared/StatusStore.swift */; };
+		6EB56518B694243EF1C42999 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6C36FFE920F24CEDB7CFDBFC /* Assets.xcassets */; };
+		8953B33B626C6EEA477C805B /* Shared/BatteryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */; };
+		89E736D554EB5FAE3FD64F89 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6C36FFE920F24CEDB7CFDBFC /* Assets.xcassets */; };
+		9E008F303200D3D799CC6A9D /* Shared/StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523434939763782ED4FBA458 /* Shared/StatusStore.swift */; };
+		A0D95B85D5C25ED1050DEA16 /* Shared/WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D959E37F8DBB774EF87E4BB4 /* Shared/WatchBridge.swift */; };
+		AD7968A325B5B1ADFDEE551C /* RecoveryWatch.app in Embed RecoveryWatch */ = {isa = PBXBuildFile; fileRef = F46EE68D33E4731FBB880916 /* RecoveryWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AFEC76C89BBC6D00852953A3 /* PocketWidgets.appex in Embed PocketWidgets */ = {isa = PBXBuildFile; fileRef = 4C7F614ED0AA44F0E1E1651F /* PocketWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B26676E9D36FC2BC12C6122A /* Shared/BatteryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */; };
+		B7A65FC1941E478C3F872368 /* Shared/WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D959E37F8DBB774EF87E4BB4 /* Shared/WatchBridge.swift */; };
+		BB2A65C83BF3F70A80ADBC52 /* RecoveryPocket/ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E2F0CBB7F4A99E681C2B4E5 /* RecoveryPocket/ContentView.swift */; };
+		DA9A925A9B241AF45AA4490A /* Widgets/PocketWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9312C1BA7BFD4C8F3ECA58A /* Widgets/PocketWidgets.swift */; };
+		E3FFB195249B827D345DB35A /* Widgets/PocketWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9312C1BA7BFD4C8F3ECA58A /* Widgets/PocketWidgets.swift */; };
+		F71DC9085CCA9EF0F4A48EBE /* Shared/StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523434939763782ED4FBA458 /* Shared/StatusStore.swift */; };
+		F7F3117E4B76A1E5DA100C15 /* Shared/BatteryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0978F427CDAFA5728AC5CDF2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 178E568AE9BCA3C0FFC6403E;
+			remoteInfo = PocketWidgets;
+		};
+		1DFB3C771B4EFC5659653EF0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EE061FD911D6E7FBAA6FBCE3;
+			remoteInfo = WatchWidgets;
+		};
+		6B8EDA5708C68AE346EC931E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 39A9B8813A032AC69B682C1A;
+			remoteInfo = RecoveryWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8D9CE8D127123F3915940E96 /* Embed WatchWidgets */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0828B99B1ECEA28C5E5DABCE /* WatchWidgets.appex in Embed WatchWidgets */,
+			);
+			name = "Embed WatchWidgets";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A5CD493B611C4D53BE9AED45 /* Embed RecoveryWatch */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				AD7968A325B5B1ADFDEE551C /* RecoveryWatch.app in Embed RecoveryWatch */,
+			);
+			name = "Embed RecoveryWatch";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0094BBABFD048C530CDA95E /* Embed PocketWidgets */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AFEC76C89BBC6D00852953A3 /* PocketWidgets.appex in Embed PocketWidgets */,
+			);
+			name = "Embed PocketWidgets";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		4362C01650CB73D4C8F13E8E /* RecoveryPocket.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = RecoveryPocket.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4C7F614ED0AA44F0E1E1651F /* PocketWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = PocketWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		523434939763782ED4FBA458 /* Shared/StatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/StatusStore.swift; sourceTree = "<group>"; };
+		5F7C3FF908DC8A02906EBD7C /* WatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = WatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C36FFE920F24CEDB7CFDBFC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6E2F0CBB7F4A99E681C2B4E5 /* RecoveryPocket/ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/ContentView.swift; sourceTree = "<group>"; };
+		839C0C788BF84861B2DC6D75 /* RecoveryPocket/RecoveryModelV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/RecoveryModelV2.swift; sourceTree = "<group>"; };
+		91323CFCA37C4B9F6D1EAF82 /* RecoveryPocket/RecoveryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/RecoveryEngine.swift; sourceTree = "<group>"; };
+		977D13A95C8A7DEF52C4CF0D /* RecoveryPocket/BatteryHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/BatteryHome.swift; sourceTree = "<group>"; };
+		AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/BatteryModel.swift; sourceTree = "<group>"; };
+		B9312C1BA7BFD4C8F3ECA58A /* Widgets/PocketWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Widgets/PocketWidgets.swift; sourceTree = "<group>"; };
+		B9F2807905A670B02163ABCD /* WatchApp/WatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchApp/WatchApp.swift; sourceTree = "<group>"; };
+		BC4F3D4A92896D4EBD1517B1 /* RecoveryPocket/HealthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/HealthStore.swift; sourceTree = "<group>"; };
+		D959E37F8DBB774EF87E4BB4 /* Shared/WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/WatchBridge.swift; sourceTree = "<group>"; };
+		EE05B3AE58AE3B7EC0A4FB27 /* RecoveryPocket/RecoveryPocketApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/RecoveryPocketApp.swift; sourceTree = "<group>"; };
+		F46EE68D33E4731FBB880916 /* RecoveryWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = RecoveryWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		04E3CF720A658181B4B6F94B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1216A00B017061AD25DA739E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1D39AE62B44F90AAADCFA33C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C72FF010C5E23DE31759B16B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		328EC33DF3954DC9B83FA285 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4362C01650CB73D4C8F13E8E /* RecoveryPocket.app */,
+				F46EE68D33E4731FBB880916 /* RecoveryWatch.app */,
+				4C7F614ED0AA44F0E1E1651F /* PocketWidgets.appex */,
+				5F7C3FF908DC8A02906EBD7C /* WatchWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E50290A24C49A459B43487C5 = {
+			isa = PBXGroup;
+			children = (
+				6C36FFE920F24CEDB7CFDBFC /* Assets.xcassets */,
+				977D13A95C8A7DEF52C4CF0D /* RecoveryPocket/BatteryHome.swift */,
+				6E2F0CBB7F4A99E681C2B4E5 /* RecoveryPocket/ContentView.swift */,
+				BC4F3D4A92896D4EBD1517B1 /* RecoveryPocket/HealthStore.swift */,
+				91323CFCA37C4B9F6D1EAF82 /* RecoveryPocket/RecoveryEngine.swift */,
+				839C0C788BF84861B2DC6D75 /* RecoveryPocket/RecoveryModelV2.swift */,
+				EE05B3AE58AE3B7EC0A4FB27 /* RecoveryPocket/RecoveryPocketApp.swift */,
+				AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */,
+				523434939763782ED4FBA458 /* Shared/StatusStore.swift */,
+				D959E37F8DBB774EF87E4BB4 /* Shared/WatchBridge.swift */,
+				B9F2807905A670B02163ABCD /* WatchApp/WatchApp.swift */,
+				B9312C1BA7BFD4C8F3ECA58A /* Widgets/PocketWidgets.swift */,
+				328EC33DF3954DC9B83FA285 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		178E568AE9BCA3C0FFC6403E /* PocketWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37814FF0B0BBAABA6924EAC4 /* Build configuration list for PBXNativeTarget "PocketWidgets" */;
+			buildPhases = (
+				B89B99438CA33AD7549E6A07 /* Sources */,
+				C72FF010C5E23DE31759B16B /* Frameworks */,
+				69DA58312C9421BA1BAC0C28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PocketWidgets;
+			productName = PocketWidgets;
+			productReference = 4C7F614ED0AA44F0E1E1651F /* PocketWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		18C0143CE94585681E05B32B /* RecoveryPocket */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FC7EA88AAD5A62058FAAB335 /* Build configuration list for PBXNativeTarget "RecoveryPocket" */;
+			buildPhases = (
+				AE27FB71CD4BB37BE7510324 /* Sources */,
+				04E3CF720A658181B4B6F94B /* Frameworks */,
+				0ACA41CFF554A25EA48ED4E8 /* Resources */,
+				A5CD493B611C4D53BE9AED45 /* Embed RecoveryWatch */,
+				C0094BBABFD048C530CDA95E /* Embed PocketWidgets */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9A29A82EC0DAB8E91E40B902 /* PBXTargetDependency */,
+				A1EE47357FE3774C7768A07D /* PBXTargetDependency */,
+			);
+			name = RecoveryPocket;
+			productName = RecoveryPocket;
+			productReference = 4362C01650CB73D4C8F13E8E /* RecoveryPocket.app */;
+			productType = "com.apple.product-type.application";
+		};
+		39A9B8813A032AC69B682C1A /* RecoveryWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E817A4F8F2CA8441AA8FA2C2 /* Build configuration list for PBXNativeTarget "RecoveryWatch" */;
+			buildPhases = (
+				DF06F920FA382496BA886853 /* Sources */,
+				1D39AE62B44F90AAADCFA33C /* Frameworks */,
+				A6D91006A06154E53D4B4EB2 /* Resources */,
+				8D9CE8D127123F3915940E96 /* Embed WatchWidgets */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FF8FB9E57DB8019C8E2A6CAA /* PBXTargetDependency */,
+			);
+			name = RecoveryWatch;
+			productName = RecoveryWatch;
+			productReference = F46EE68D33E4731FBB880916 /* RecoveryWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EE061FD911D6E7FBAA6FBCE3 /* WatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 97C3B6D3159C484850BB5F43 /* Build configuration list for PBXNativeTarget "WatchWidgets" */;
+			buildPhases = (
+				A3E9F105B14AB2173F379040 /* Sources */,
+				1216A00B017061AD25DA739E /* Frameworks */,
+				D8D93416E9535048D00414D2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WatchWidgets;
+			productName = WatchWidgets;
+			productReference = 5F7C3FF908DC8A02906EBD7C /* WatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = BC7E287B75C6D3E574547D08 /* Build configuration list for PBXProject "RecoveryPocket" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = E50290A24C49A459B43487C5;
+			productRefGroup = 328EC33DF3954DC9B83FA285 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				18C0143CE94585681E05B32B /* RecoveryPocket */,
+				39A9B8813A032AC69B682C1A /* RecoveryWatch */,
+				178E568AE9BCA3C0FFC6403E /* PocketWidgets */,
+				EE061FD911D6E7FBAA6FBCE3 /* WatchWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0ACA41CFF554A25EA48ED4E8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				89E736D554EB5FAE3FD64F89 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		69DA58312C9421BA1BAC0C28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A6D91006A06154E53D4B4EB2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6EB56518B694243EF1C42999 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8D93416E9535048D00414D2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A3E9F105B14AB2173F379040 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E3FFB195249B827D345DB35A /* Widgets/PocketWidgets.swift in Sources */,
+				1326DD4B852006877BD419CA /* Shared/BatteryModel.swift in Sources */,
+				F71DC9085CCA9EF0F4A48EBE /* Shared/StatusStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AE27FB71CD4BB37BE7510324 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				357EFE1D486781BC42FB667A /* RecoveryPocket/RecoveryPocketApp.swift in Sources */,
+				BB2A65C83BF3F70A80ADBC52 /* RecoveryPocket/ContentView.swift in Sources */,
+				337D58D7B0992EC31D38DCBE /* RecoveryPocket/BatteryHome.swift in Sources */,
+				5AC7C54E71F9D6DD55CD798C /* RecoveryPocket/HealthStore.swift in Sources */,
+				194A7CCA4F13CF008DE83F2D /* RecoveryPocket/RecoveryEngine.swift in Sources */,
+				005048F28D97559F876E0857 /* RecoveryPocket/RecoveryModelV2.swift in Sources */,
+				B26676E9D36FC2BC12C6122A /* Shared/BatteryModel.swift in Sources */,
+				6604D0BD1166C9D5D3D4B875 /* Shared/StatusStore.swift in Sources */,
+				A0D95B85D5C25ED1050DEA16 /* Shared/WatchBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B89B99438CA33AD7549E6A07 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA9A925A9B241AF45AA4490A /* Widgets/PocketWidgets.swift in Sources */,
+				8953B33B626C6EEA477C805B /* Shared/BatteryModel.swift in Sources */,
+				03FE567F41B0D88AE9463924 /* Shared/StatusStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF06F920FA382496BA886853 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C4926D90F2E992E9DD30DF2 /* WatchApp/WatchApp.swift in Sources */,
+				F7F3117E4B76A1E5DA100C15 /* Shared/BatteryModel.swift in Sources */,
+				9E008F303200D3D799CC6A9D /* Shared/StatusStore.swift in Sources */,
+				B7A65FC1941E478C3F872368 /* Shared/WatchBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9A29A82EC0DAB8E91E40B902 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 39A9B8813A032AC69B682C1A /* RecoveryWatch */;
+			targetProxy = 6B8EDA5708C68AE346EC931E /* PBXContainerItemProxy */;
+		};
+		A1EE47357FE3774C7768A07D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 178E568AE9BCA3C0FFC6403E /* PocketWidgets */;
+			targetProxy = 0978F427CDAFA5728AC5CDF2 /* PBXContainerItemProxy */;
+		};
+		FF8FB9E57DB8019C8E2A6CAA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EE061FD911D6E7FBAA6FBCE3 /* WatchWidgets */;
+			targetProxy = 1DFB3C771B4EFC5659653EF0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		068B2BBA43E9CE419C4424C6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = WatchApp/Watch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WatchApp/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		115ACF06A257FCEF502776B4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = RecoveryPocket/RecoveryPocket.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RecoveryPocket/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1C6332C759B35B5B3487F3CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		2F93946DB58EA490E3FAFCA4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Widgets/Watch-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		3E16383604C3F00A71E386A5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = WatchApp/Watch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WatchApp/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		5E60CF91D783C4078F00D42A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Widgets/Watch-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		8B7212A5EF49F64ACD4F072A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		9D5D2E74971D8D8AD4E1D042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = RecoveryPocket/RecoveryPocket.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RecoveryPocket/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B61C27E3BF9EA46361A06564 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Widgets/iOS-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B915D0D779A5CC04F59DAE88 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Widgets/iOS-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		37814FF0B0BBAABA6924EAC4 /* Build configuration list for PBXNativeTarget "PocketWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B915D0D779A5CC04F59DAE88 /* Debug */,
+				B61C27E3BF9EA46361A06564 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		97C3B6D3159C484850BB5F43 /* Build configuration list for PBXNativeTarget "WatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E60CF91D783C4078F00D42A /* Debug */,
+				2F93946DB58EA490E3FAFCA4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BC7E287B75C6D3E574547D08 /* Build configuration list for PBXProject "RecoveryPocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C6332C759B35B5B3487F3CD /* Debug */,
+				8B7212A5EF49F64ACD4F072A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E817A4F8F2CA8441AA8FA2C2 /* Build configuration list for PBXNativeTarget "RecoveryWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3E16383604C3F00A71E386A5 /* Debug */,
+				068B2BBA43E9CE419C4424C6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FC7EA88AAD5A62058FAAB335 /* Build configuration list for PBXNativeTarget "RecoveryPocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				115ACF06A257FCEF502776B4 /* Debug */,
+				9D5D2E74971D8D8AD4E1D042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}
