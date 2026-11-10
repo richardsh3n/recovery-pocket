@@ -16,7 +16,14 @@ enum StatusStore {
             return false
         }
         let data: Data
-        do { data = try JSONEncoder().encode(value) }
+        do {
+            let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+            data = try encoder.encode(value)
+            if let oldData=try? Data(contentsOf:url),var old=try? JSONDecoder().decode(PocketStatus.self,from:oldData){
+                old.computedAt=value.computedAt
+                if try encoder.encode(old) == data {return true}
+            }
+        }
         catch {
             #if DEBUG
             print("Pocket summary encoding failed: \((error as NSError).domain) \((error as NSError).code)")

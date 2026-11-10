@@ -1,7 +1,8 @@
 import SwiftUI
 import Charts
+import UIKit
 
-private enum PocketStyle {
+enum PocketStyle {
     static let paper = Color(red: PocketPalette.paper.0, green: PocketPalette.paper.1, blue: PocketPalette.paper.2)
     static let ink = Color(red: PocketPalette.ink.0, green: PocketPalette.ink.1, blue: PocketPalette.ink.2)
     static let green = Color(red: PocketPalette.green.0, green: PocketPalette.green.1, blue: PocketPalette.green.2)
@@ -9,20 +10,16 @@ private enum PocketStyle {
     static let mint = Color(red: PocketPalette.mint.0, green: PocketPalette.mint.1, blue: PocketPalette.mint.2)
     static let rule = Color.black.opacity(0.10)
 }
-struct PocketEvent: Codable, Identifiable {
-    var id = UUID()
-    var date: Date
-    var kind: String
-    var energy: Int
-    var note: String
-}
 @MainActor final class PocketExperience: ObservableObject {
     @Published var demo = false
     @Published var demoBattery = BatteryDemo.status()
+    @Published var demoShadow: ShadowReplay?
     @Published var events: [PocketEvent] = []
     @Published var demoEvents: [PocketEvent] = []
     @Published var error: String?
     @Published private(set) var canUndoDeletion = false
+    private var estimateCacheKey: String?
+    private var estimateCache: [RecoveryEstimate] = []
     private var deletedEvents: [PocketEvent] = []
     private var deletedInDemo = false
     private var eventsReadFailed = false
@@ -31,15 +28,16 @@ struct PocketEvent: Codable, Identifiable {
     }
     init() { reloadEvents() }
     func reloadEvents() {
-        guard FileManager.default.fileExists(atPath: eventsURL.path) else { eventsReadFailed = false; return }
         do {
-            let loaded = try JSONDecoder().decode([PocketEvent].self, from: Data(contentsOf: eventsURL))
-            events = loaded; eventsReadFailed = false; error = nil
+            guard let data=try ManualRecordTransaction.read(from:eventsURL) else {events=[];eventsReadFailed=false;error=nil;return}
+            events=try JSONDecoder().decode([PocketEvent].self,from:data)
+            eventsReadFailed=false;error=nil
         } catch {
-            eventsReadFailed = true
-            self.error = "已有记录暂时无法读取，已保留原文件。解锁后重新打开 App 重试。"
+            eventsReadFailed=true
+            self.error="已有记录或中断的恢复暂时无法核验，原文件已保留。解锁后重新打开重试。"
         }
     }
+    @discardableResult func restoreEvents(_ rows:[PocketEvent])->Bool { commit(rows) }
     var recordsUnavailable: Bool { !demo && eventsReadFailed }
     var visibleEvents: [PocketEvent] { (demo ? demoEvents : events).sorted { $0.date > $1.date } }
     @discardableResult func add(_ event: PocketEvent) -> Bool {
@@ -50,8 +48,7 @@ struct PocketEvent: Codable, Identifiable {
         do {
             let folder = eventsURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try JSONEncoder().encode(next).write(to: eventsURL, options: [.atomic, .completeFileProtection])
-            var url = folder; var flags = URLResourceValues(); flags.isExcludedFromBackup = true; try url.setResourceValues(flags)
+            try ManualRecordTransaction.write(try JSONEncoder().encode(next),to:eventsURL)
             events = next; return true
         } catch { self.error = "记录未保存，请稍后重试"; return false }
     }
@@ -59,7 +56,7 @@ struct PocketEvent: Codable, Identifiable {
         if demo { demoEvents = next; error = nil; return true }
         guard !eventsReadFailed else { error = "已有记录未能读取，暂不修改文件。"; return false }
         do {
-            try JSONEncoder().encode(next).write(to: eventsURL, options: [.atomic, .completeFileProtection])
+            try ManualRecordTransaction.write(try JSONEncoder().encode(next),to:eventsURL)
             events = next; error = nil; return true
         } catch { self.error = "修改未保存，请稍后重试"; return false }
     }
@@ -85,64 +82,159 @@ struct PocketEvent: Codable, Identifiable {
     func toggleDemo(_ enabled: Bool, health: HealthStore) {
         if demo != enabled { deletedEvents = []; canUndoDeletion = false }
         demo = enabled
+        demoShadow = nil
         if enabled {
             demoBattery = BatteryDemo.status()
             demoBattery.dayHRV = DayHRVModel.summary(DayHRVModel.demo(), now:Date())
             let rows = estimates(health, target: UserDefaults.standard.double(forKey: "sleepTarget") > 0 ? UserDefaults.standard.double(forKey: "sleepTarget") : 8)
             if let night = nights(health).max(by: { $0.date < $1.date }) {
                 let result = rows.first { Calendar.current.isDate($0.date, inSameDayAs: night.date) }
-                demoBattery.recoverySummary = WearableSummary(date: night.date, recovery: result?.score, sleepHours: night.sleepHours, hrv: night.hrv, heartRate: night.heartRate, baselineNights: result?.baselineNights ?? 0)
+                demoBattery.recoverySummary = WearableSummary(date: night.date, recovery: result?.score, sleepHours: night.sleepHours, hrv: night.hrv, heartRate: night.heartRate, baselineNights: result?.baselineNights ?? 0, recoveryBasis:result?.scoreBasis,recoveryModelRevision:RecoveryModelV2.revision)
             }
         }
         WatchBridge.shared.presentationOverride = enabled ? demoBattery : nil
         WatchBridge.shared.publishHealth(health.battery)
     }
     func status(_ health: HealthStore) -> PocketStatus { demo ? demoBattery : health.battery }
+    func shadow(_ health:HealthStore) -> ShadowReplay? { demo ? demoShadow : health.shadowReplay }
+    func shadowInspection(_ health:HealthStore)->ShadowReplayInspection? {demo ? demoShadow?.inspection:health.shadowInspection}
     func nights(_ health: HealthStore) -> [NightRecord] {
         guard demo else { return health.snapshot?.nights ?? [] }
         let calendar = Calendar.current, today = calendar.startOfDay(for: Date())
+        #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--pocket-sleep-only-demo") {
+            return [NightRecord(date:today,sleepHours:8,hrv:nil,heartRate:nil,hrvCount:0,heartRateCount:0)]
+        }
+        #endif
         return (0..<43).map { offset in
             let wave = sin(Double(offset) * 0.63)
-            return NightRecord(date: calendar.date(byAdding: .day, value: -offset, to: today)!, sleepHours: offset == 0 ? 7.7 : 7.6 + wave * 0.7, hrv: 52 + wave * 9, heartRate: 55 - wave * 3, hrvCount: 5, heartRateCount: 42)
+            return NightRecord(date: calendar.date(byAdding: .day, value: -offset, to: today)!, sleepHours: offset == 0 ? 7.7 : 7.6 + wave * 0.7, hrv: 52 + wave * 9, heartRate: 55 - wave * 3, hrvCount: 5, heartRateCount: 42,hrvSourceKey:"synthetic-watch",heartRateSourceKey:"synthetic-watch",hrvDurationBucket:2)
         }
     }
     func estimates(_ health: HealthStore, target: Double) -> [RecoveryEstimate] {
+        let key = "\(demo)|\(health.snapshot?.fetchedAt.timeIntervalSinceReferenceDate ?? 0)|\(health.cacheRevision)|\(demoBattery.computedAt.timeIntervalSinceReferenceDate)|\(Calendar.current.startOfDay(for: Date()).timeIntervalSinceReferenceDate)|\(target)"
+        if estimateCacheKey == key { return estimateCache }
         let days = nights(health).map { night in
             let prior = Calendar.current.date(byAdding: .day, value: -1, to: night.date)!
             return RecoveryDay(night: night, activeKcal: demo ? 420 : health.snapshot?.energy.first { Calendar.current.isDate($0.date, inSameDayAs: prior) }?.kcal, sleepMidpointHour: nil)
         }
-        return RecoveryModelV2.calculate(days: days, sleepTarget: target)
+        let result = RecoveryModelV2.calculate(days: days, sleepTarget: target)
+        estimateCacheKey = key; estimateCache = result
+        return result
     }
 }
+
+// MARK: - 每日决策层（把分数翻译成"今天怎么做"）
+// This layer only rephrases the same experimental estimate shown elsewhere into
+// an action. It adds no new physiological claim and never hides the caveat.
+
+extension DailyDecision {
+    var levelColor: Color {
+        switch level {
+        case .push: return PocketStyle.green
+        case .steady: return PocketStyle.mint
+        case .hold: return PocketStyle.drain
+        case .unknown: return PocketStyle.ink.opacity(0.45)
+        }
+    }
+}
+
+// Load/strain numerics live in Shared/BatteryModel.swift so the watch target and
+// the synthetic core tests can share exactly the same implementation.
 
 struct PocketRoot: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var health: HealthStore
     @StateObject private var experience = PocketExperience()
+    @StateObject private var integrated = IntegratedJournal()
+    @ObservedObject private var watchInbox = WatchBridge.shared
     @AppStorage("sleepTarget") private var sharedTarget = 8.0
     @State private var selected = 0
-    private let tabs = [("今日", "house"), ("趋势", "chart.bar"), ("记录", "doc.text"), ("我的", "person")]
+    private let tabs = [(0,"今日","house"),(4,"身体","heart.text.clipboard"),(1,"洞察","chart.bar"),(2,"记录","doc.text"),(3,"我的","person")]
     var body: some View {
         TabView(selection: $selected) {
             BatteryHome().tabItem { Label("今日", systemImage: "house") }.tag(0)
             PocketBody().tabItem { Label("身体", systemImage: "heart.text.clipboard") }.tag(4)
-            PocketTrends().tabItem { Label("趋势", systemImage: "chart.bar") }.tag(1)
+            WellnessHub().tabItem { Label("洞察", systemImage: "chart.bar") }.tag(1)
             PocketJournal().tabItem { Label("记录", systemImage: "doc.text") }.tag(2)
             PocketProfile().tabItem { Label("我的", systemImage: "person") }.tag(3)
-        }.environmentObject(experience)
+        }.toolbar(.hidden,for:.tabBar)
+            .safeAreaInset(edge:.bottom,spacing:0) {
+                HStack(spacing:0) {
+                    ForEach(tabs,id:\.0) { tab in
+                        Button { selected = tab.0 } label: {
+                            VStack(spacing:5) { Image(systemName:tab.2).font(.system(size:20,weight:selected == tab.0 ? .semibold : .regular)); Text(tab.1).font(.caption2.weight(selected == tab.0 ? .semibold : .regular)) }.frame(maxWidth:.infinity,minHeight:48).foregroundStyle(selected == tab.0 ? PocketStyle.green : PocketStyle.ink.opacity(0.65)).background(selected == tab.0 ? PocketStyle.green.opacity(0.07) : .clear,in:RoundedRectangle(cornerRadius:14))
+                        }.buttonStyle(.plain).accessibilityLabel(tab.1).accessibilityIdentifier("tab-\(tab.0)").accessibilityAddTraits(selected == tab.0 ? .isSelected : [])
+                    }
+                }.padding(.horizontal,18).padding(.top,10).padding(.bottom,6).background(PocketStyle.paper).overlay(alignment:.top) { Rectangle().fill(PocketStyle.rule).frame(height:0.5) }
+            }.environmentObject(experience).environmentObject(integrated)
+            .disabled(integrated.restoring)
+            .overlay {
+                if integrated.restoring {
+                    ZStack {
+                        Color.black.opacity(0.08).ignoresSafeArea()
+                        ProgressView("正在恢复本机记录，请稍候").padding(24).background(PocketStyle.paper,in:RoundedRectangle(cornerRadius:20))
+                    }
+                }
+            }
+            .onChange(of:integrated.restoring){_,active in if !active {consumeWatchInbox()}}
             .tint(PocketStyle.green).preferredColorScheme(.light)
-            .onChange(of: scenePhase) { _, phase in if phase == .active { experience.reloadEvents() } }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { experience.reloadEvents();integrated.reload();consumeWatchInbox() } }
+            .onChange(of:watchInbox.inbox.count){_,_ in consumeWatchInbox()}
             .onChange(of: sharedTarget) { _, _ in if experience.demo { experience.toggleDemo(true, health: health) } else if health.requested { Task { await health.refresh() } } }
             .onChange(of: health.cacheRevision) { _, _ in experience.toggleDemo(false, health: health) }
+            .onAppear {
+                consumeWatchInbox()
+                #if targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("--pocket-demo") { experience.toggleDemo(true,health:health) }
+                if ProcessInfo.processInfo.arguments.contains("--pocket-state-demo") {
+                    experience.toggleDemo(true,health:health)
+                    experience.demoBattery=BatteryDemo.recentStateStatus()
+                    WatchBridge.shared.presentationOverride=experience.demoBattery
+                    WatchBridge.shared.publish(experience.demoBattery)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--pocket-continuous-demo") {
+                    experience.toggleDemo(true,health:health)
+                    experience.demoBattery=BatteryDemo.continuousStatus()
+                    WatchBridge.shared.presentationOverride=experience.demoBattery
+                    WatchBridge.shared.publish(experience.demoBattery)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--pocket-workout-fallback-demo") {
+                    experience.toggleDemo(true,health:health)
+                    experience.demoBattery=BatteryDemo.workoutFallbackStatus()
+                    WatchBridge.shared.presentationOverride=experience.demoBattery
+                    WatchBridge.shared.publish(experience.demoBattery)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--pocket-shadow-demo") || ProcessInfo.processInfo.arguments.contains("--pocket-shadow-coverage-demo"),
+                   let replay = ProcessInfo.processInfo.arguments.contains("--pocket-shadow-coverage-demo") ? ShadowCoverageFixture.make():ShadowReplayEngine.demo() {
+                    experience.toggleDemo(true,health:health)
+                    experience.demoShadow=replay
+                    if ProcessInfo.processInfo.arguments.contains("--pocket-shadow-validation-demo") {experience.demoEvents=PairedModelValidationEngine.demoEvents()}
+                    experience.demoBattery=replay.baseline
+                    WatchBridge.shared.presentationOverride=replay.baseline
+                    WatchBridge.shared.publish(replay.baseline)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--pocket-stale-demo") {
+                    experience.toggleDemo(true,health:health)
+                    experience.demoBattery = BatteryDemo.status(now:Date().addingTimeInterval(-3*3600))
+                }
+                #endif
+            }
             .onOpenURL { url in if url.scheme == "recoverypocket" { selected = 0 } }
+    }
+    private func consumeWatchInbox(){
+        guard !experience.demo,!integrated.restoring else{return}
+        for row in watchInbox.inbox where row.valid(now:Date()) {
+            if experience.events.contains(where:{$0.id == row.id}) || experience.add(PocketEvent(id:row.id,date:row.date,kind:"自评",energy:row.energy,note:"来自 Apple Watch；未事后补配预测")){watchInbox.acknowledge(row.id)}
+        }
     }
 }
 private struct FlatRule: View { var body: some View { Rectangle().fill(PocketStyle.rule).frame(height: 0.5).padding(.vertical, 14) } }
-private struct PageHeader: View {
+struct PageHeader: View {
     let title: String
     var body: some View { VStack(alignment: .leading, spacing: 8) { Text("RECOVERY  /  POCKET").font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary); Text(title).font(.system(size: 32, weight: .semibold)) }.foregroundStyle(PocketStyle.ink) }
 }
-private struct DemoNote: View { @EnvironmentObject var experience: PocketExperience; var body: some View { if experience.demo { Text("演示数据 · 非你的健康记录").font(.caption).foregroundStyle(PocketStyle.green) } } }
+struct DemoNote: View { @EnvironmentObject var experience: PocketExperience; @EnvironmentObject var health:HealthStore; var body: some View { if experience.demo || health.battery.demo { Text("演示数据 · 非你的健康记录").font(.caption).foregroundStyle(PocketStyle.green) } } }
 
 struct BatteryHome: View {
     @EnvironmentObject private var health: HealthStore
@@ -150,105 +242,211 @@ struct BatteryHome: View {
     @AppStorage("sleepTarget") private var target = 8.0
     @AppStorage("dailyIntentV4") private var intent = "工作"
     @State private var day = Calendar.current.startOfDay(for: Date())
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var calendarSelection
+    @State private var calendarAnchor = Calendar.current.startOfDay(for: Date())
     @State private var calendarOpen = false
     @State private var composer = false
     @State private var resting = false
     @State private var connection = false
+    @State private var timelineSelection: Date?
+    @State private var composerKind = "休息"
+    @AppStorage("aiCloudEnabled") private var aiCloudEnabled = false
+    @AppStorage("aiMorningCloudEnabled") private var aiMorningCloudEnabled = false
+    @AppStorage("aiCloudEndpoint") private var aiCloudEndpoint = ""
+    @AppStorage("aiCloudModel") private var aiCloudModel = ""
+    @State private var aiHasKey = false
+    @State private var aiStatus = false
+    @StateObject private var briefAI = PocketBriefAI()
     private var status: PocketStatus { experience.status(health) }
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
     private var isFuture: Bool { day > Calendar.current.startOfDay(for: Date()) }
-    private var allPoints: [BatteryPoint] { experience.demo ? experience.demoBattery.points : health.batteryHistory }
+    private var allPoints: [BatteryPoint] { experience.demo ? experience.demoBattery.points : status.usesStateEstimate ? health.stateHistory : health.batteryHistory }
     private var dayPoints: [BatteryPoint] {
         let start = Calendar.current.startOfDay(for: day), end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
-        return allPoints.filter { $0.date > start && $0.date <= end && $0.date <= Date() }
+        return allPoints.filter { point in
+            let withinDay = point.belongs(to:start,end:end,instant:status.usesStateEstimate)
+            return withinDay && point.date <= Date() && point.value.map { $0.isFinite && (0...100).contains($0) } == true
+        }
     }
-    private var stats: DailyBatteryStatistics { DailyBatteryStatistics.calculate(points: allPoints, day: day, now: Date()) }
-    private var lastNight: NightRecord? { experience.nights(health).filter { $0.sleepHours != nil && (isToday || Calendar.current.isDate($0.date, inSameDayAs: day)) }.max { $0.date < $1.date } }
+    private var stats: DailyBatteryStatistics {
+        if status.usesStateEstimate {
+            let values = dayPoints.compactMap(\.value)
+            return DailyBatteryStatistics(latest: dayPoints.max { $0.date < $1.date }, minimum: values.min(), maximum: values.max(), charged: 0, drained: 0, coveredSeconds: 0)
+        }
+        return DailyBatteryStatistics.calculate(points: allPoints, day: day, now: Date())
+    }
+    private var lastNight: NightRecord? { experience.nights(health).filter { $0.sleepHours != nil && Calendar.current.isDate($0.date, inSameDayAs: day) }.max { $0.date < $1.date } }
     private var workouts: [PocketWorkout] { let end = Calendar.current.date(byAdding: .day, value: 1, to: day)!; return (experience.demo ? WorkoutAnalysis.demoWorkouts(day: day) : health.snapshot?.workouts ?? []).filter { $0.start < end && $0.end > day && $0.end <= Date() } }
     private var kcal: Double? { experience.demo ? (isFuture ? nil : 420) : health.snapshot?.energy.first { Calendar.current.isDate($0.date, inSameDayAs: day) }?.kcal }
     private var eventCount: Int { experience.visibleEvents.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }.count }
-    private func moveDay(_ offset: Int) { day = Calendar.current.date(byAdding: .day, value: offset, to: day) ?? day }
+    private var calendarDays: [Date] {
+        let earliest = allPoints.map(\.date).min().map { Calendar.current.startOfDay(for: $0) }
+        let defaultStart = Calendar.current.date(byAdding: .day, value: -60, to: calendarAnchor)!
+        let start = min(earliest ?? defaultStart, defaultStart)
+        let count = Calendar.current.dateComponents([.day], from: start, to: calendarAnchor).day ?? 60
+        return (0...count + 7).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: start) }
+    }
+    private var dateMotion: Animation? { reduceMotion ? nil : .spring(duration: 0.42, bounce: 0.08) }
+    private func selectDay(_ date: Date) {
+        withAnimation(dateMotion) { day = Calendar.current.startOfDay(for: date) }
+    }
+    private func moveDay(_ offset: Int) {
+        guard let next = Calendar.current.date(byAdding: .day, value: offset, to: day), calendarDays.contains(next) else { return }
+        selectDay(next)
+    }
     private func statCell(_ title: String, _ value: String) -> some View { VStack(alignment: .leading, spacing: 6) { Text(title).font(.caption).foregroundStyle(.secondary); Text(value).font(.subheadline.weight(.medium)) }.frame(maxWidth: .infinity, alignment: .leading) }
     private var dateBar: some View {
-        HStack {
-            Button { moveDay(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }.accessibilityLabel("前一天")
-            Spacer()
-            Button { calendarOpen = true } label: { HStack { Text(day.formatted(.dateTime.month().day().weekday())); Image(systemName: "calendar") }.font(.subheadline).frame(minHeight: 44) }.accessibilityLabel("选择回看日期")
-            Spacer()
-            Button { moveDay(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("后一天")
-        }.contentShape(Rectangle()).highPriorityGesture(DragGesture(minimumDistance: 30).onEnded { value in
-            if abs(value.translation.width) > 60 && abs(value.translation.width) > abs(value.translation.height) * 1.5 { moveDay(value.translation.width < 0 ? 1 : -1) }
-        })
+        let dates = calendarDays
+        let recordedDays = Set(allPoints.filter { $0.role != .intervalStart && $0.date <= Date() && $0.value.map { $0.isFinite && (0...100).contains($0) } == true }.map { Calendar.current.startOfDay(for:$0.groupingDate(instant:status.usesStateEstimate)) })
+        return VStack(spacing: 8) {
+            HStack {
+                Button { moveDay(-1) } label: { Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold)).frame(width: 44, height: 44) }.accessibilityLabel("前一天").disabled(day == calendarDays.first)
+                Spacer()
+                Button { calendarOpen = true } label: {
+                    HStack(spacing: 7) { Text(day.formatted(.dateTime.year().month())).lineLimit(1).minimumScaleFactor(0.5); Image(systemName: "calendar").font(.system(size: 16)) }.font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                }.accessibilityLabel("选择回看日期")
+                Spacer()
+                Button { moveDay(1) } label: { Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).frame(width: 44, height: 44) }.accessibilityLabel("后一天").disabled(day == calendarDays.last)
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(dates, id: \.self) { date in
+                            let selected = Calendar.current.isDate(date, inSameDayAs: day)
+                            let hasRecord = recordedDays.contains(date)
+                            Button { selectDay(date) } label: {
+                                VStack(spacing: 8) {
+                                    Text(Calendar.current.isDateInToday(date) ? "今天" : date.formatted(.dateTime.weekday(.narrow))).font(.system(size: 11, weight: .medium))
+                                    Text(String(Calendar.current.component(.day, from: date))).font(.system(size: 20, weight: selected ? .semibold : .regular)).monospacedDigit()
+                                    Circle().fill(hasRecord ? (selected ? Color.white : PocketStyle.green) : Color.clear).frame(width: 4, height: 4)
+                                }.frame(width: 43, height: 66).foregroundStyle(selected ? Color.white : PocketStyle.ink.opacity(0.7))
+                                    .background {
+                                        if selected { RoundedRectangle(cornerRadius: 18).fill(PocketStyle.green).matchedGeometryEffect(id: "selected-date", in: calendarSelection) }
+                                    }
+                            }.buttonStyle(PocketPressStyle()).id(date)
+                                .accessibilityLabel(date.formatted(.dateTime.month().day().weekday()) + (hasRecord ? "，有状态记录" : "，无状态记录"))
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                        }
+                    }.padding(.vertical, 4)
+                }.scrollIndicators(.hidden)
+                    .onAppear { proxy.scrollTo(day, anchor: .center) }
+                    .onChange(of: day) { _, date in withAnimation(dateMotion) { proxy.scrollTo(date, anchor: .center) } }
+            }
+            HStack(spacing: 5) { Image(systemName: "arrow.left.arrow.right"); Text("左右滑动，回看每天") }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.top, 3)
+        }
     }
+    private var dailyPager: some View {
+        DailyEnergyPager(day: $day, status: status, points: allPoints, headline: decision.headline,
+                         workouts: health.snapshot?.workouts ?? [], demo: experience.demo, busy: health.busy,
+                         compact: compactProbe, calendarDays: calendarDays,
+                         revision: health.snapshot?.fetchedAt ?? status.computedAt,
+                         refresh: { Task { await health.refresh() } })
+    }
+
     private var estimate: RecoveryEstimate? {
         guard experience.demo || health.snapshot.map({ Date().timeIntervalSince($0.fetchedAt) < 21600 }) == true,
-              let result = experience.estimates(health, target: target).filter({ $0.score != nil && (isToday || Calendar.current.isDate($0.date, inSameDayAs: day)) }).last else { return nil }
+              let result = experience.estimates(health, target: target).filter({ Calendar.current.isDate($0.date, inSameDayAs: day) }).last else { return nil }
         return result
     }
+    private var todayStrain: Double? {
+        let minutes = RecoveryEngine.merged(workouts.map { SleepInterval(start:$0.start,end:$0.end) },from:day,to:Date()).reduce(0.0) { $0+$1.end.timeIntervalSince($1.start)/60 }
+        return StrainEngine.strain(kcal: kcal, workoutMinutes: minutes)
+    }
+    private var decision: DailyDecision {
+        DecisionEngine.make(estimate: estimate, status: status, lastNight: lastNight, todayKcal: kcal,
+                            strain: todayStrain, sleepTarget: target, intent: intent, now: Date())
+    }
+    private var aiConfig: AIBackendConfig {
+        AIBackendConfig(cloudEnabled: aiCloudEnabled && aiMorningCloudEnabled, endpoint: aiCloudEndpoint, model: aiCloudModel, hasStoredKey: aiHasKey, certificatePin: UserDefaults.standard.string(forKey: "aiBridgeCertificateSHA256") ?? "")
+    }
+    private var coachBrief: CoachBrief { experience.coachContext(health, target: target, intent: intent).brief(.today) }
+    /// 只有这些输入变了才需要重新生成晨报；日期、重点、事实与本地结论任一变化都会触发。
+    private var briefSignature: String {
+        (["\(day.timeIntervalSince1970)", intent, String(target), String(experience.demo), String(health.cacheRevision), String(status.computedAt.timeIntervalSince1970), String(aiCloudEnabled), String(aiMorningCloudEnabled), aiCloudEndpoint, aiCloudModel, String(aiHasKey), decision.headline, decision.subline] + coachBrief.facts.map { "\($0.key)=\($0.value)=\($0.detail)" } + coachBrief.gaps)
+            .joined(separator: "|")
+    }
+    private var displayBrief: MorningBrief {
+        briefAI.brief ?? MorningBriefEngine.local(headline: decision.headline, subline: decision.subline,
+                                                  facts: coachBrief.facts, gaps: coachBrief.gaps, now: Date())
+    }
+    private func refreshBrief(force: Bool) async {
+        aiHasKey = aiConfig.validURL.map { AIKeychain.hasKey(matching: $0) } ?? false
+        let given = [decision.headline, decision.subline] + decision.actions.map { "\($0.headline) \($0.reason)" }
+        await briefAI.generate(headline: decision.headline, subline: decision.subline,
+                               facts: coachBrief.facts, gaps: coachBrief.gaps, given: given,
+                               config: aiConfig, force: force)
+    }
+    /// Simulator-only verification helper: hides the battery hero card so the full
+    /// decision card fits one screenshot. Mirrors the existing --pocket-demo flags.
+    /// `--pocket-brief` additionally scrolls to the bottom so the晨报来源行 is visible.
+    private var briefProbe: Bool { ProcessInfo.processInfo.arguments.contains("--pocket-brief") }
+    private var compactProbe: Bool { briefProbe || ProcessInfo.processInfo.arguments.contains("--pocket-compact") }
     private var suggestion: String { intent == "训练" ? "结合实际感受安排强度" : intent == "恢复" ? "留出一段不赶时间的休息" : "下午留出一次短休息" }
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PageHeader(title: isToday ? "今天" : "电量日历")
+                    if isToday { IntegratedTodayCard(headline:decision.headline).padding(.vertical,16) }
                     dateBar
-                    HStack { DemoNote(); Spacer(); if !isToday { Button("回到今天") { day = Calendar.current.startOfDay(for: Date()) }.font(.caption) } }
+                    HStack { DemoNote(); Spacer(); if !isToday { Button("回到今天") { selectDay(Date()) }.font(.caption) } }
                     
-                    TimelineView(.periodic(from:.now,by:60)) { context in
-                        let value = isFuture ? nil : isToday ? status.displayValue(at:context.date) : stats.latest?.value.map { Int($0.rounded()) }
-                        let stale = isToday && value == nil && status.value != nil && status.measuredAt != nil
-                        VStack(alignment:.leading,spacing:16) {
-                            HStack { Text("身体电量").font(.subheadline.weight(.medium)); Spacer(); Text(isToday ? "实验估计 · 未校准" : "历史估计").font(.caption).foregroundStyle(.secondary) }
-                            HStack(alignment:.firstTextBaseline,spacing:10) { Text(value.map(String.init) ?? (stale ? "等待新观测" : "尚无观测")).font(.system(size:value == nil ? 30 : 96,weight:.light)).monospacedDigit().foregroundStyle(PocketStyle.green); if value != nil { Text("/ 100").font(.subheadline).foregroundStyle(.secondary) } }
-                            if let value { ProgressView(value:Double(value),total:100).tint(PocketStyle.green) }
-                            HStack(alignment:.top) {
-                                VStack(alignment:.leading,spacing:5) {
-                                    Text(value == nil ? (isFuture ? "未来日期" : stale ? "最近记录已过期" : "等待可用记录") : isToday ? status.evidenceLabel : "当天最后观测").font(.subheadline.weight(.medium))
-                                    if stale, let last = status.value, let date = status.measuredAt { Text("最近观测 \(last) · " + date.formatted(date:.abbreviated,time:.shortened)).font(.subheadline).foregroundStyle(PocketStyle.green) }
-                                    else if let date = isToday ? status.measuredAt : stats.latest?.date { Text("观测至 " + date.formatted(date:isToday ? .omitted : .abbreviated,time:.shortened)).font(.caption).foregroundStyle(.secondary) }
+                    dailyPager.padding(.top, 16)
+                    NavigationLink { RecoveryDetails(day:day) } label: {
+                        MorningRecoveryCard(result:estimate,showsDisclosure:true)
+                    }.buttonStyle(PocketPressStyle()).padding(.top,14)
+                    if isToday {
+                        NavigationLink { PocketCoachView() } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: "sparkles").font(.title3).foregroundStyle(PocketStyle.green)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("AI 健康教练").font(.subheadline.weight(.semibold))
+                                    Text(aiCloudEnabled && aiHasKey ? "针对记录提问，查看依据并继续追问" : "连接已有 Codex 订阅，开始个性化问答").font(.caption).foregroundStyle(.secondary)
                                 }
-                                Spacer(); NavigationLink { EstimateDetails() } label: { Image(systemName:"info.circle").font(.title3).frame(width:44,height:44) }.accessibilityLabel("查看电量计算依据")
-                            }
-                            if (value != nil || stale) && isToday, let note = status.dataNote(at:context.date) { Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true) }
-                            if value == nil && !isFuture { NavigationLink("检查健康连接与数据") { HealthConnectionView() }.font(.subheadline).buttonStyle(.bordered) }
-                        }.padding(22).frame(maxWidth:.infinity,alignment:.leading).background(PocketStyle.green.opacity(0.055),in:RoundedRectangle(cornerRadius:24)).padding(.top,16)
+                                Spacer(minLength: 4); Image(systemName: "arrow.up.right").font(.subheadline)
+                            }.foregroundStyle(PocketStyle.ink).padding(16).frame(maxWidth: .infinity, alignment: .leading).background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        }.buttonStyle(PocketPressStyle()).padding(.top, 12)
+                    }
+                    if isToday,let lead = decision.actions.first {
+                        Button { composerKind = lead.eventKind; composer = true } label: {
+                            HStack(spacing:12) { Image(systemName:lead.icon).font(.title3); VStack(alignment:.leading,spacing:5) { Text(lead.headline).font(.subheadline.weight(.semibold)); Text(lead.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true) }; Spacer(minLength:4); Image(systemName:"plus.circle") }.foregroundStyle(PocketStyle.ink).padding(16).frame(maxWidth:.infinity,alignment:.leading).background(PocketStyle.green.opacity(0.04),in:RoundedRectangle(cornerRadius:16))
+                        }.buttonStyle(.plain).accessibilityLabel("记录下一步："+lead.headline).padding(.top,12)
                     }
                     FlatRule()
-                    HStack {
-                        amount("补充", value: stats.coveredSeconds > 0 ? String(format: "+%.1f", stats.charged) : "—", color: PocketStyle.green)
-                        Rectangle().fill(PocketStyle.rule).frame(width: 0.5, height: 52).padding(.horizontal, 20)
-                        amount("消耗", value: stats.coveredSeconds > 0 ? String(format: "−%.1f", stats.drained) : "—", color: PocketStyle.drain)
+                    if isToday {
+                        DisclosureGroup("今日解读与行动建议") {
+                            DecisionCard(decision:decision,brief:displayBrief,briefBusy:briefAI.busy,briefNotice:briefAI.notice,onRefreshBrief:{ Task { await refreshBrief(force:true) } },onOpenAIStatus:{ aiStatus = true }) { kind in composerKind = kind; composer = true }.padding(.top,12)
+                            if let note = status.dataNote(at:Date()) { Text(note).font(.caption).foregroundStyle(.secondary).padding(.top,10) }
+                        }.font(.subheadline).padding(.bottom,20)
                     }
-                    FlatRule()
-                    HStack { Text(isToday ? "今天的节奏" : "当天的节奏").font(.title3.weight(.semibold)); Spacer(); NavigationLink("回看") { BatteryHistory(day: day) }.font(.subheadline) }
-                    BatteryPlot(points: dayPoints, height: 130).padding(.top, 12)
-                    HStack(spacing: 18) { HStack(spacing: 5) { Image(systemName: "circle.fill").foregroundStyle(PocketStyle.mint); Text("补充").foregroundStyle(PocketStyle.green) }; HStack(spacing: 5) { Image(systemName: "circle.fill").foregroundStyle(.orange); Text("消耗").foregroundStyle(PocketStyle.drain) }; Spacer(); Text("缺少记录处留空").foregroundStyle(.secondary) }.font(.caption2).padding(.top, 8)
-                    FlatRule()
                     DisclosureGroup("当天数据与统计") {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 20) {
-                        statCell("电量最高 / 最低", stats.minimum.flatMap { low in stats.maximum.map { high in "\(Int(high.rounded())) / \(Int(low.rounded()))" } } ?? "—")
-                        statCell("可比较观测", String(format: "%.1f 小时", stats.coveredSeconds / 3600))
+                        statCell(status.usesStateEstimate ? "状态最高 / 最低" : "电量最高 / 最低", stats.minimum.flatMap { low in stats.maximum.map { high in "\(Int(high.rounded())) / \(Int(low.rounded()))" } } ?? "—")
+                        statCell(status.usesStateEstimate ? "状态记录" : "可比较观测",status.usesStateEstimate ? "\(dayPoints.count) 次" : String(format: "%.1f 小时", stats.coveredSeconds / 3600))
                         statCell("活动能量", kcal.map { String(format: "%.0f kcal", $0) } ?? "暂无记录")
                         statCell("步数", experience.demo ? (isFuture ? "暂无记录" : "6,420 步") : health.snapshot?.steps?.first { Calendar.current.isDate($0.date, inSameDayAs: day) }?.count.map { String(format: "%.0f 步", $0) } ?? "暂无记录")
                         statCell("训练 / 手动记录", "\(workouts.count) 次 / \(eventCount) 条")
                     }
-                    Text("历史电量按当前实验模型重算。补充与消耗只统计相邻有效观测的净变化；缺失时段不补算。").font(.caption2).foregroundStyle(.secondary).padding(.top, 14)
+                    Text(status.usesStateEstimate ? "历史状态只使用当时之前的信号回算；不是连续电量收支。" : "历史电量按当前实验模型重算。补充与消耗只统计相邻有效观测的净变化；缺失时段不补算。").font(.caption2).foregroundStyle(.secondary).padding(.top, 14)
                     }.font(.subheadline).padding(.vertical,4)
                     FlatRule()
-                    NavigationLink { WorkoutImpactView(day: day) } label: { summaryRow("训练与消耗时段", value: "查看这一天 →", icon: "figure.run") }.buttonStyle(.plain)
+                    NavigationLink { EnergyInsightsView(day: day) } label: { summaryRow("电量洞察", value: "时段 · 训练 · 七天节奏 →", icon: "chart.xyaxis.line") }.buttonStyle(.plain)
                     FlatRule()
                     if isToday {
+                    NavigationLink { WeeklyReviewView() } label: { summaryRow("每周回顾与计划",value:"睡眠 · 训练 · 个人目标",icon:"chart.bar.xaxis") }.buttonStyle(.plain)
+                    FlatRule()
                     HStack { Text("安排今天").font(.title3.weight(.semibold)); Spacer(); Text("让节奏更适合你").font(.caption).foregroundStyle(.secondary) }
                     HStack(spacing: 8) {
                         ForEach([("工作", "laptopcomputer"), ("训练", "dumbbell"), ("恢复", "leaf")], id: \.0) { item in
-                            Button { intent = item.0 } label: { HStack(spacing: 6) { Image(systemName: item.1); Text(item.0) }.font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity).padding(.vertical, 13).foregroundStyle(intent == item.0 ? .white : PocketStyle.ink).background(intent == item.0 ? PocketStyle.green : .clear, in: Capsule()).overlay { Capsule().stroke(intent == item.0 ? .clear : PocketStyle.rule, lineWidth: 1) } }.buttonStyle(.plain)
+                            Button { withAnimation(dateMotion) { intent = item.0 } } label: { HStack(spacing: 6) { Image(systemName: item.1); Text(item.0) }.font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity).padding(.vertical, 13).foregroundStyle(intent == item.0 ? .white : PocketStyle.ink).background(intent == item.0 ? PocketStyle.green : .clear, in: Capsule()).overlay { Capsule().stroke(intent == item.0 ? .clear : PocketStyle.rule, lineWidth: 1) } }.buttonStyle(.plain)
                         }
                     }.padding(.top, 15)
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: intent == "工作" ? "cup.and.saucer" : intent == "训练" ? "figure.walk" : "leaf").font(.title3).padding(.top, 3)
                         VStack(alignment: .leading, spacing: 6) { Text(suggestion).font(.subheadline.weight(.medium)); Text("以实际感受为准，记录后再回看变化。") .font(.caption).foregroundStyle(.secondary) }
                         Spacer(minLength: 0)
-                        Button { composer = true } label: { Text("记录 →").font(.subheadline) }.accessibilityLabel("记录休息或当前感受")
+                        Button { composerKind = intent == "训练" ? "训练" : "休息"; composer = true } label: { Text("记录 →").font(.subheadline) }.accessibilityLabel("记录休息或当前感受")
                     }.padding(.top, 20)
                     FlatRule()
                     Button { resting = true } label: { summaryRow("短休息", value: "5 / 10 / 20 分钟", icon: "cup.and.saucer") }; FlatRule()
@@ -260,9 +458,27 @@ struct BatteryHome: View {
                     if let notice = health.notice, !experience.demo { Text(notice).font(.caption).foregroundStyle(.secondary).padding(.top, 20) }
                 }.padding(24).padding(.bottom, 12)
             }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).foregroundStyle(PocketStyle.ink).toolbar(.hidden, for: .navigationBar)
-                .refreshable { if experience.demo { experience.toggleDemo(true, health: health) } else { await health.refresh() } }
-                .sheet(isPresented: $calendarOpen) { NavigationStack { DatePicker("选择日期", selection: $day, displayedComponents: .date).datePickerStyle(.graphical).padding(24).navigationTitle("选择日期").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { calendarOpen = false } } } }.tint(PocketStyle.green) }
-                .sheet(isPresented: $composer) { EventComposer(defaultKind: intent == "训练" ? "训练" : "休息") }
+                .defaultScrollAnchor(briefProbe ? .bottom : .top)
+                .refreshable { if experience.demo { experience.toggleDemo(true, health: health) } else { await health.refresh() }; await refreshBrief(force: true) }
+                .task(id: briefSignature) { if isToday { await refreshBrief(force: false) } }
+                .onDisappear { briefAI.reset() }
+                .onChange(of: day) { _,_ in timelineSelection = nil }
+                .sensoryFeedback(.selection, trigger: day)
+                .onChange(of: aiStatus) { _, shown in if !shown { aiHasKey = aiConfig.validURL.map { AIKeychain.hasKey(matching: $0) } ?? false } }
+                .onAppear {
+                    #if targetEnvironment(simulator)
+                    // 与 --pocket-demo / --pocket-load 同类：只用于模拟器截图，不参与真实流程。
+                    if ProcessInfo.processInfo.arguments.contains("--pocket-ai") { aiStatus = true }
+                    // Layout fixtures only: these flags never run on a physical phone.
+                    let arguments = ProcessInfo.processInfo.arguments
+                    if let index = arguments.firstIndex(of: "--pocket-calendar-offset"), arguments.indices.contains(index + 1), let offset = Int(arguments[index + 1]), (-60...7).contains(offset) {
+                        day = Calendar.current.date(byAdding: .day, value: offset, to: calendarAnchor)!
+                    }
+                    #endif
+                }
+                .sheet(isPresented: $aiStatus) { NavigationStack { AIStatusView() } }
+                .sheet(isPresented: $calendarOpen) { NavigationStack { DatePicker("选择日期", selection: Binding(get: { day }, set: { selectDay($0) }), in: calendarDays.first!...calendarDays.last!, displayedComponents: .date).datePickerStyle(.graphical).padding(24).navigationTitle("选择日期").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { calendarOpen = false } } } }.tint(PocketStyle.green) }
+                .sheet(isPresented: $composer) { EventComposer(defaultKind: composerKind) }
                 .sheet(isPresented: $resting) { PhoneRest() }
                 .sheet(isPresented: $connection) { NavigationStack { HealthConnectionView() } }
         }
@@ -380,9 +596,13 @@ struct PocketTrends: View {
         let today = Calendar.current.startOfDay(for: Date())
         return Calendar.current.date(byAdding: .day, value: -(period - 1), to: today)!...Calendar.current.date(byAdding: .day, value: 1, to: today)!
     }
+    var embedded = false
     var body: some View {
-        NavigationStack { ScrollView { VStack(alignment: .leading, spacing: 20) {
+        Group { if embedded { content } else { NavigationStack { content } } }
+    }
+    private var content: some View { ScrollView { VStack(alignment: .leading, spacing: 20) {
             PageHeader(title: "趋势"); DemoNote()
+            NavigationLink { EnergyInsightsView(day: Calendar.current.startOfDay(for: Date())) } label: { HStack { Image(systemName: "square.grid.3x3.fill"); VStack(alignment: .leading, spacing: 4) { Text("电量节奏地图").font(.subheadline.weight(.medium)); Text("按小时看消耗，按日期回看训练").font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").font(.caption) }.padding(18).foregroundStyle(PocketStyle.green).background(PocketStyle.green.opacity(0.055), in: RoundedRectangle(cornerRadius: 18)) }.buttonStyle(.plain)
             Picker("观察范围", selection: $period) { Text("7天").tag(7); Text("30天").tag(30) }.pickerStyle(.segmented)
             Picker("指标", selection: $metric) { ForEach(["恢复", "睡眠", "HRV", "精力"], id: \.self) { Text($0) } }.pickerStyle(.segmented)
             if !series.isEmpty {
@@ -402,7 +622,7 @@ struct PocketTrends: View {
             } else {
             ForEach(nights.suffix(period).reversed()) { night in NavigationLink { if metric == "恢复" { RecoveryDetails(day: night.date) } else { NightDetail(night: night) } } label: { HStack { Text(night.date.formatted(.dateTime.month().day())); Spacer(); Text(sleepLabel(night.sleepHours)); Image(systemName: "chevron.right").font(.caption) }.font(.subheadline).foregroundStyle(PocketStyle.ink).padding(.vertical, 10) }; Divider() }
             }
-        }.padding(24) }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).toolbar(.hidden, for: .navigationBar) }
+        }.padding(24) }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).toolbar(embedded ? .visible : .hidden, for: .navigationBar).navigationTitle("指标趋势").navigationBarTitleDisplayMode(.inline)
     }
 }
 struct SleepDetails: View {
@@ -419,19 +639,103 @@ struct RecoveryDetails: View {
     @EnvironmentObject var health: HealthStore
     @EnvironmentObject var experience: PocketExperience
     @AppStorage("sleepTarget") private var target = 8.0
-    private var result: RecoveryEstimate? { let rows = experience.estimates(health, target: target); return day.flatMap { date in rows.first { Calendar.current.isDate($0.date, inSameDayAs: date) } } ?? (day == nil ? rows.filter { $0.score != nil }.last : nil) }
+    private var result: RecoveryEstimate? { let rows = experience.estimates(health, target: target); return day.flatMap { date in rows.first { Calendar.current.isDate($0.date, inSameDayAs: date) } } ?? (day == nil ? rows.last : nil) }
     private var reference: Int? {
         let nights = experience.nights(health)
         let latest = day.flatMap { date in nights.first { Calendar.current.isDate($0.date,inSameDayAs:date) } } ?? nights.filter { $0.hrv != nil && $0.sleepHours != nil }.max { $0.date < $1.date }
         guard let latest, let hrv = latest.hrv else { return nil }
-        let prior = nights.filter { $0.date < latest.date && $0.hrvCount > 0 && $0.hrv.map { $0.isFinite && $0 > 0 } == true }
+        let prior = nights.filter { $0.date < latest.date && $0.hrvSourceKey == latest.hrvSourceKey && $0.hrvDurationBucket == latest.hrvDurationBucket && $0.hrvCount > 0 && $0.hrv.map { $0.isFinite && $0 > 0 } == true }
         let resting:[VitalRecord] = experience.demo ? (0..<42).map { offset in VitalRecord(name:"静息心率",date:Calendar.current.date(byAdding:.day,value:-offset,to:Calendar.current.startOfDay(for:Date()))!,value:55+sin(Double(offset))*0.6,unit:"次/分",source:"合成演示") } : (health.snapshot?.vitals ?? []).filter { $0.name == "静息心率" }
         guard let rhr = resting.first(where:{ Calendar.current.isDate($0.date,inSameDayAs:latest.date) }) else { return nil }
         let pastRHR = resting.filter { $0.date < rhr.date && $0.source == rhr.source && $0.date >= rhr.date.addingTimeInterval(-28*86400) }
         guard prior.count >= 14, pastRHR.count >= 14 else { return nil }
         return OpenRecoveryReference.score(hrv:hrv,baselineHRV:RecoveryEngine.median(prior.compactMap(\.hrv)),restingHR:rhr.value,baselineRestingHR:RecoveryEngine.median(pastRHR.map(\.value)),sleepMinutes:latest.sleepHours.map { $0*60 },needMinutes:target*60)
     }
-    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 20) { DemoNote(); if let date = result?.date { Text(date.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary) }; Text(result?.score.map(String.init) ?? "—").font(.system(size: 72, weight: .light)).foregroundStyle(PocketStyle.green); Text(result?.state ?? "建立基线中").font(.title3); Text("\(result?.baselineNights ?? 0) 个有效历史夜晚 · \(result?.reliability ?? "等待数据")").font(.caption).foregroundStyle(.secondary); FlatRule(); Text("影响这次估计的因素").font(.headline); ForEach(result?.reasons ?? []) { reason in VStack(alignment: .leading, spacing: 6) { Text(reason.name).font(.subheadline.weight(.medium)); Text(reason.detail).font(.caption).foregroundStyle(.secondary) }; Divider() }; LabeledContent("开源算法对照", value: reference.map(String.init) ?? "数据不足"); Text("Whoordan 部分公式，Apache 2.0。使用睡眠 SDNN 与静息心率各自匹配的历史，未读到静息心率时不代替；分数标尺不同，只作对照。两种算法都未经个人准确性验证。") .font(.caption).foregroundStyle(.secondary) }.padding(24) }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).navigationTitle("恢复参考").toolbar(.visible, for: .navigationBar) }
+    var body: some View {
+        ScrollView {
+            VStack(alignment:.leading,spacing:22) {
+                DemoNote()
+                if let date=result?.date { Text(date.formatted(date:.abbreviated,time:.omitted)).font(.caption).foregroundStyle(.secondary) }
+                MorningRecoveryCard(result:result)
+                Text(RecoveryModelV2.scaleNote).font(.subheadline).foregroundStyle(.secondary)
+                if let low=result?.lower,let high=result?.upper {
+                    LabeledContent("模型不确定范围",value:"\(low)–\(high)")
+                    Text("范围反映采样与模型的不确定性，尚未验证为统计置信区间。").font(.caption).foregroundStyle(.secondary)
+                }
+                FlatRule()
+                Text("影响这次估计的因素").font(.headline)
+                ForEach((result?.reasons ?? []).filter { $0.name != "分数含义" }) { reason in
+                    VStack(alignment:.leading,spacing:6) {
+                        Text(reason.name).font(.subheadline.weight(.medium))
+                        Text(reason.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                }
+                DisclosureGroup("模型与开源对照") {
+                    LabeledContent("开源算法对照",value:reference.map(String.init) ?? "数据不足").padding(.top,12)
+                    Text("Whoordan 部分公式，Apache 2.0。需要匹配历史的睡眠 SDNN 与真实静息心率；标尺不同，只作对照。当前恢复指数未经个人校准，不是 WHOOP 算法。").font(.caption).foregroundStyle(.secondary)
+                    Text(RecoveryModelV2.revision).font(.caption2).foregroundStyle(.secondary)
+                }
+            }.padding(24)
+        }.safeAreaPadding(.bottom,24).background(PocketStyle.paper).navigationTitle("晨间恢复").toolbar(.visible,for:.navigationBar)
+    }
+}
+private struct MorningRecoveryCard: View {
+    var result:RecoveryEstimate?
+    var showsDisclosure=false
+    private var color:Color { guard let value=result?.score else { return PocketStyle.ink.opacity(0.5) };return value < 45 ? PocketStyle.drain : value >= 80 ? PocketStyle.green : PocketStyle.mint }
+    var body:some View {
+        VStack(alignment:.leading,spacing:12) {
+            HStack { Label("晨间恢复",systemImage:"sun.horizon").font(.subheadline.weight(.semibold));Spacer();if showsDisclosure { Image(systemName:"arrow.up.right").font(.caption) } }
+            HStack(alignment:.firstTextBaseline,spacing:10) {
+                Text(result?.score.map(String.init) ?? "—").font(.system(size:46,weight:.light)).monospacedDigit().foregroundStyle(color)
+                VStack(alignment:.leading,spacing:4) {
+                    Text(result?.state ?? "恢复待比较").font(.subheadline.weight(.medium))
+                    Text(result?.scoreBasis ?? "等待可比的睡眠 HRV 或心率").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let score=result?.score {
+                GeometryReader { geo in
+                    ZStack(alignment:.leading) {
+                        Capsule().fill(LinearGradient(colors:[PocketStyle.drain.opacity(0.7),PocketStyle.mint,PocketStyle.green],startPoint:.leading,endPoint:.trailing))
+                        Circle().fill(PocketStyle.paper).overlay(Circle().stroke(color,lineWidth:2)).frame(width:14,height:14).offset(x:max(0,(geo.size.width-14)*Double(score)/100))
+                    }
+                }.frame(height:8).padding(.vertical,4).accessibilityHidden(true)
+                HStack { Text("偏低");Spacer();Text("65 · 个人惯常");Spacer();Text("较有利") }.font(.caption2).foregroundStyle(.secondary)
+            } else if let completion=result?.sleepCompletion {
+                Text("睡眠目标完成 \(completion)% · 睡眠记录照常保留").font(.caption).foregroundStyle(PocketStyle.green)
+            }
+            Text(result?.reliability ?? "已有数据会继续展示；没有基线时不填入默认高分。").font(.caption2).foregroundStyle(.secondary)
+        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).foregroundStyle(PocketStyle.ink)
+            .background(PocketStyle.green.opacity(0.045),in:RoundedRectangle(cornerRadius:20))
+            .accessibilityElement(children:.combine)
+    }
+}
+private struct WorkoutCardioCard:View {
+    var workout:PocketWorkout
+    var body:some View {
+        VStack(alignment:.leading,spacing:10) {
+            HStack { Text(workout.title).font(.subheadline.weight(.semibold));Spacer();Text(workout.start.formatted(date:.omitted,time:.shortened)).font(.caption).foregroundStyle(.secondary) }
+            if let cardio=workout.cardio {
+                HStack(alignment:.firstTextBaseline) {
+                    Text(cardio.averageHR.map { String(format:"%.0f",$0) } ?? "—").font(.system(size:30,weight:.light)).monospacedDigit()
+                    Text("平均心率").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(cardio.peakHR.map { String(format:"峰值 %.0f",$0) } ?? "峰值 —").font(.caption).foregroundStyle(.secondary)
+                }
+                GeometryReader { geo in
+                    ZStack(alignment:.leading) { Capsule().fill(PocketStyle.ink.opacity(0.06));Capsule().fill(PocketStyle.mint).frame(width:geo.size.width*cardio.coverageFraction) }
+                }.frame(height:6).accessibilityHidden(true)
+                Text(String(format:"心率覆盖 %.1f / %.1f 分钟 · %.0f%%",cardio.coveredMinutes,cardio.windowMinutes,cardio.coverageFraction*100)).font(.caption).foregroundStyle(.secondary)
+                if let load=cardio.relativeLoadMinutes,let baseline=cardio.restingReference {
+                    Text(String(format:"相对负荷 %.1f 加权分钟 · 静息参考 %.0f",load,baseline)).font(.caption).foregroundStyle(PocketStyle.green)
+                    Text("按高于个人静息心率的幅度与已观测时长累计，公式未经个人校准；不是 WHOOP 分数。").font(.caption2).foregroundStyle(.secondary)
+                } else { Text("静息基线不足时只展示实际心率，不猜测个人强度。").font(.caption2).foregroundStyle(.secondary) }
+            } else {
+                Text("尚无可用的训练时段心率；刷新后按已有记录计算。").font(.caption).foregroundStyle(.secondary)
+            }
+        }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(.white,in:RoundedRectangle(cornerRadius:16))
+    }
 }
 struct PocketJournal: View {
     @State private var editing: PocketEvent?
@@ -443,10 +747,25 @@ struct PocketJournal: View {
     private var legacy: [String: String] { (try? JSONDecoder().decode([String: String].self, from: Data(legacyJSON.utf8))) ?? [:] }
     var body: some View {
         NavigationStack { List {
-            Section { VStack(alignment: .leading, spacing: 18) { PageHeader(title: "记录"); DemoNote(); Text("记录休息、训练、咖啡或当下精力。之后回看它们与状态如何一起变化。") .font(.subheadline).foregroundStyle(.secondary); Button("记录此刻") { composer = true }.buttonStyle(.borderedProminent); Picker("记录类型", selection: $filter) { ForEach(["全部", "自评", "休息", "训练", "咖啡", "饮酒", "晚睡"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.menu) } }.listRowSeparator(.hidden).listRowBackground(PocketStyle.paper)
+            Section {
+                VStack(alignment: .leading, spacing: 18) {
+                    PageHeader(title: "记录")
+                    DemoNote()
+                    Text("先给此刻的精力打分。也可以选填今天的习惯，或记下刚发生的事，留给之后回看。")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Button("记录此刻") { composer = true }.buttonStyle(.borderedProminent)
+                }
+            }.listRowSeparator(.hidden).listRowBackground(PocketStyle.paper)
+            Section("回看我的记录") {
+                NavigationLink { FeedbackReviewView() } label: { Label("状态与体感对照", systemImage: "checkmark.bubble") }
+                NavigationLink { HabitInsightsView() } label: { Label("习惯与精力对照", systemImage: "list.bullet.clipboard") }
+            }.listRowBackground(PocketStyle.paper)
             Section("时间线") {
+                Picker("筛选记录", selection: $filter) {
+                    ForEach(["全部", "自评", "休息", "训练", "咖啡", "饮酒", "晚睡"], id: \.self) { Text($0).tag($0) }
+                }.pickerStyle(.menu)
                 if filteredEvents.isEmpty { Text(experience.recordsUnavailable ? "已有记录暂时无法显示。" : filter == "全部" ? "你的第一条记录，从此刻开始。" : "还没有这一类记录。") .foregroundStyle(.secondary) }
-                ForEach(filteredEvents) { event in Button { editing = event } label: { VStack(alignment: .leading, spacing: 7) { HStack { Text(event.kind).font(.headline); Spacer(); Text("精力 \(event.energy)/5").font(.caption).foregroundStyle(PocketStyle.green) }; Text(event.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary); if !event.note.isEmpty { Text(event.note).font(.subheadline) } } }.buttonStyle(.plain).accessibilityHint("编辑记录") }
+                ForEach(filteredEvents) { event in Button { editing = event } label: { VStack(alignment: .leading, spacing: 7) { HStack { Text(event.kind).font(.headline); Spacer(); Text("精力 \(event.energy)/5").font(.caption).foregroundStyle(PocketStyle.green) }; Text(event.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary); if let load=event.sessionLoad { Text(String(format:"训练体感 %d/10 · %.0f 分钟 · 主观负荷 %.0f",event.sessionRPE!,event.trainingMinutes!,load)).font(.caption).foregroundStyle(PocketStyle.green) }; if !event.note.isEmpty { Text(event.note).font(.subheadline) } } }.buttonStyle(.plain).accessibilityHint("编辑记录") }
                     .onDelete { offsets in let rows = filteredEvents; experience.remove(Set(offsets.map { rows[$0].id })) }
             }.listRowBackground(PocketStyle.paper)
             if !legacy.isEmpty && !experience.demo { Section("以前的自评") { ForEach(legacy.keys.sorted().reversed(), id: \.self) { date in VStack(alignment: .leading) { Text(date); Text(legacy[date] ?? "").font(.caption).foregroundStyle(.secondary) } } }.listRowBackground(PocketStyle.paper) }
@@ -456,25 +775,130 @@ struct PocketJournal: View {
     }
 }
 struct EventComposer: View {
+    @State private var habitAnswers:[String:Bool] = [:]
     @EnvironmentObject var experience: PocketExperience
+    @EnvironmentObject var health:HealthStore
     @Environment(\.dismiss) var dismiss
     let defaultKind: String
     var editing: PocketEvent? = nil
     var initialDate: Date? = nil
+    var workout:PocketWorkout? = nil
     @State private var kind = "自评"
-    @State private var energy = 3
+    @State private var energy:Int?
+    @State private var rpe:Int?
+    @State private var minutesText=""
+    @State private var prediction:RecordedPrediction?
+    @State private var modelComparison:FrozenModelComparison?
     @State private var note = ""
     @State private var date = Date()
-    var body: some View { NavigationStack { Form { Section { DemoNote(); Picker("记录什么", selection: $kind) { ForEach(["自评", "休息", "训练", "咖啡", "饮酒", "晚睡"], id: \.self) { Text($0) } }; DatePicker("时间", selection: $date, in: ...Date()); Stepper("此刻精力 \(energy)/5", value: $energy, in: 1...5); TextField("一句话记录（可选）", text: $note, axis: .vertical).lineLimit(3...5); if let error = experience.error { Text(error).foregroundStyle(.orange) } }; Section { Text("记录用于回看，不会自动改变电量或解释因果。") .font(.caption).foregroundStyle(.secondary) } }.navigationTitle(editing == nil ? "记录此刻" : "编辑记录").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("保存") { let event = PocketEvent(id: editing?.id ?? UUID(), date: date, kind: kind, energy: energy, note: String(note.prefix(500))); if editing == nil ? experience.add(event) : experience.update(event) { dismiss() } } } }.onAppear { kind = defaultKind; if let initialDate { date = min(Date(), Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: initialDate) ?? initialDate) }; if let editing { energy = editing.energy; note = editing.note; date = editing.date }; experience.error = nil }.tint(PocketStyle.green) }
+    @State private var validation:String?
+    @State private var initialized=false
+    private var attachedPrediction:RecordedPrediction? {
+        if editing != nil { return prediction.flatMap { $0.usable(for:date,now:Date()) ? $0:nil } }
+        return FeedbackEngine.attachment(prediction,eventDate:date,recordedAt:Date())
+    }
+    private func save() {
+        guard let energy,(1...5).contains(energy) else { validation="请先选择此刻精力。";return }
+        let minutes=Double(minutesText.trimmingCharacters(in:.whitespaces))
+        if kind == "训练",rpe != nil,minutes.map({ $0.isFinite && $0 > 0 && $0 <= 1440 }) != true { validation="补充训练强度时，请填写大于 0 且不超过 1440 分钟的实际训练时长。";return }
+        let captured=attachedPrediction
+        var event=PocketEvent(id:editing?.id ?? UUID(),date:date,kind:kind,energy:energy,note:String(note.prefix(500)),prediction:captured,sessionRPE:kind == "训练" ? rpe:nil,trainingMinutes:kind == "训练" && rpe != nil ? minutes:nil,workoutID:kind == "训练" ? (workout?.id ?? editing?.workoutID):nil,habitAnswers:habitAnswers.isEmpty ? nil:habitAnswers,recordedAt:editing?.recordedAt ?? Date(),modifiedAt:editing == nil ? nil:Date())
+        if editing != nil {event.modelComparison=modelComparison}
+        else if let modelComparison,modelComparison.usable(for:event,now:Date()) {event.modelComparison=modelComparison}
+        if editing == nil ? experience.add(event):experience.update(event) { dismiss() }
+    }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment:.leading,spacing:24) {
+                    HStack {
+                        Button("取消") { dismiss() }.frame(minHeight:44)
+                        Spacer()
+                        Button("保存记录",action:save).font(.subheadline.weight(.semibold)).padding(.horizontal,18).frame(minHeight:44).foregroundStyle(.white).background(energy == nil ? PocketStyle.ink.opacity(0.25):PocketStyle.green,in:Capsule()).disabled(energy == nil)
+                    }.buttonStyle(.plain)
+                    Text(editing == nil ? "记录此刻" : "编辑记录").font(.system(size:30,weight:.semibold))
+                    DemoNote()
+                    VStack(alignment:.leading,spacing:22) {
+                        Picker("记录什么",selection:$kind) { ForEach(["自评","休息","训练","咖啡","饮酒","晚睡"],id:\.self) { Text($0) } }
+                        Divider()
+                        DatePicker("时间",selection:$date,in:...Date())
+                        Divider()
+                        VStack(alignment:.leading,spacing:12) {
+                            Text("此刻精力").font(.headline)
+                            HStack(spacing:8) {
+                                ForEach(1...5,id:\.self) { value in
+                                    Button { energy=value;validation=nil } label: {
+                                        Text(String(value)).font(.title3.weight(.medium)).frame(maxWidth:.infinity,minHeight:48).foregroundStyle(energy == value ? .white:PocketStyle.ink).background(energy == value ? PocketStyle.green:PocketStyle.green.opacity(0.06),in:RoundedRectangle(cornerRadius:12))
+                                    }.buttonStyle(.plain).accessibilityLabel("精力 \(value) 分，满分 5 分").accessibilityAddTraits(energy == value ? .isSelected:[])
+                                }
+                            }
+                            HStack { Text("1 · 很疲惫");Spacer();Text("5 · 精力充沛") }.font(.caption).foregroundStyle(.secondary)
+                            if energy == nil { Text("请主动选择，不会预填为 3 分。").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        if kind == "训练" {
+                            Divider()
+                            Picker("整次训练有多费力（可选）",selection:$rpe) {
+                                Text("暂不填写").tag(Int?.none)
+                                ForEach(0...10,id:\.self) { value in Text("\(value) / 10").tag(Int?.some(value)) }
+                            }.pickerStyle(.menu)
+                            if rpe != nil { TextField("实际训练时长（分钟）",text:$minutesText).keyboardType(.decimalPad) }
+                            Text("回顾整次训练：0 为完全不费力，10 为极其费力。强度 × 时长记录为主观训练负荷，不与热量重复相加。").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let workout { Text("关联训练："+workout.title).font(.caption).foregroundStyle(PocketStyle.green) }
+                        Divider()
+                        habitContext
+                        TextField("一句话记录（可选）",text:$note,axis:.vertical).lineLimit(3...5).onChange(of:note) { _, value in if value.count > 500 { note=String(value.prefix(500)) } }
+                        if let error=validation ?? experience.error { Text(error).font(.caption).foregroundStyle(PocketStyle.drain) }
+                    }.padding(20).background(PocketStyle.green.opacity(0.055),in:RoundedRectangle(cornerRadius:20))
+                    if let modelComparison,modelComparison.baseline.usable(for:date,now:Date()),editing != nil || Date().timeIntervalSince(modelComparison.baseline.capturedAt)<=300 { Text(editing == nil ? "已同时冻结正式与影子模型；填写后才能进入双模型对照。候选不改写当前电量。":"编辑仍会保留原预测，但该条不再进入前瞻双模型检验。").font(.caption).foregroundStyle(PocketStyle.green) }
+                    Text(attachedPrediction != nil ? "已保留填写前的模型结果，保存后可在“状态与体感对照”回看。自评不会直接改写电量。":"当前没有可配对的新鲜模型结果，仍可保存体感；补记历史不会回填现在的分数。").font(.caption).foregroundStyle(.secondary)
+                }.padding(24)
+            }.background(PocketStyle.paper).toolbar(.hidden,for:.navigationBar).scrollDismissesKeyboard(.interactively)
+                .onAppear {
+                    guard !initialized else { return };initialized=true
+                    kind=editing?.kind ?? defaultKind
+                    habitAnswers=editing?.habitAnswers ?? [:]
+                    if let editing { energy=editing.energy;note=editing.note;date=editing.date;prediction=editing.prediction;modelComparison=editing.modelComparison;rpe=editing.sessionRPE;minutesText=editing.trainingMinutes.map { String(format:"%.0f",$0) } ?? "" }
+                    else {
+                        let now=Date();date=now
+                        if let initialDate,!Calendar.current.isDate(initialDate,inSameDayAs:now) { date=min(now,Calendar.current.date(bySettingHour:12,minute:0,second:0,of:initialDate) ?? initialDate) }
+                        prediction=RecordedPrediction.capture(experience.status(health),at:now)
+                        modelComparison=FrozenModelComparison.capture(experience.shadow(health),expected:experience.status(health),at:now)
+                        if let workout {kind="训练";minutesText=String(format:"%.0f",workout.duration/60)}
+                    }
+                    experience.error=nil
+                }.tint(PocketStyle.green)
+        }
+    }
+    private var habitContext: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("这一天的习惯（可选）").font(.headline)
+            Text("只填想对照的项目。确实没有发生时选「无」，暂不确定就留在「未记录」。")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(HabitEvidenceEngine.names.keys.sorted(), id: \.self) { key in
+                Picker(HabitEvidenceEngine.names[key] ?? key, selection: Binding(
+                    get: { habitAnswers[key].map { $0 ? 1 : 2 } ?? 0 },
+                    set: { value in
+                        if value == 0 { habitAnswers.removeValue(forKey: key) }
+                        else { habitAnswers[key] = value == 1 }
+                    }
+                )) {
+                    Text("未记录").tag(0)
+                    Text("有").tag(1)
+                    Text("无").tag(2)
+                }.pickerStyle(.menu)
+            }
+        }
     }
 }
+
 struct PocketProfile: View {
     @ObservedObject private var bridge = WatchBridge.shared
     @EnvironmentObject var health: HealthStore
     @EnvironmentObject var experience: PocketExperience
     @AppStorage("sleepTarget") private var target = 8.0
     @State private var settings = false
-    var body: some View { NavigationStack { ScrollView { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "我的"); Text("只对照自己的节奏。").foregroundStyle(.secondary); FlatRule(); Toggle("体验演示数据", isOn: Binding(get: { experience.demo }, set: { experience.toggleDemo($0, health: health) })); Text("演示会同步到手表和组件，并明确标记。关闭后恢复真实摘要。") .font(.caption).foregroundStyle(.secondary); FlatRule(); Text("健康与设备").font(.title3.weight(.semibold)); NavigationLink(health.requested ? "健康连接与读取检查" : "连接 Apple 健康") { HealthConnectionView() }.buttonStyle(.borderedProminent); Text(bridge.connection).font(.caption).foregroundStyle(.secondary); NavigationLink("添加手机与手表组件") { WidgetInstructions() }; NavigationLink("数据来源与覆盖") { DataCoverage() }; Button("睡眠目标、权限与隐私") { settings = true }; NavigationLink("了解估计与算法") { EstimateDetails() }; if let notice = health.notice { Text(notice).font(.caption).foregroundStyle(.secondary) } }.padding(24) }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).toolbar(.hidden, for: .navigationBar).sheet(isPresented: $settings) { SettingsView(sleepTarget: $target) } } }
+    var body: some View { NavigationStack { ScrollView { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "我的"); Text("只对照自己的节奏。").foregroundStyle(.secondary); FlatRule(); Toggle("体验演示数据", isOn: Binding(get: { experience.demo }, set: { experience.toggleDemo($0, health: health) })); Text("演示会同步到手表和组件，并明确标记。关闭后恢复真实摘要。") .font(.caption).foregroundStyle(.secondary); FlatRule(); Text("健康与设备").font(.title3.weight(.semibold)); NavigationLink(health.requested ? "健康连接与读取检查" : "连接 Apple 健康") { HealthConnectionView() }.buttonStyle(.borderedProminent); Text(bridge.connection).font(.caption).foregroundStyle(.secondary); NavigationLink("添加手机与手表组件") { WidgetInstructions() }; NavigationLink("数据来源与覆盖") { DataCoverage() }; Button("睡眠目标、权限与隐私") { settings = true }; NavigationLink("教练与数据解读") { PocketCoachView() }; NavigationLink("AI 接入与自检") { AIStatusView() }; NavigationLink("了解估计与算法") { EstimateDetails() }; if let notice = health.notice { Text(notice).font(.caption).foregroundStyle(.secondary) } }.padding(24) }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).toolbar(.hidden, for: .navigationBar).sheet(isPresented: $settings) { SettingsView(sleepTarget: $target) } } }
 }
 struct HealthConnectionView: View {
     @EnvironmentObject private var health: HealthStore
@@ -492,14 +916,14 @@ struct HealthConnectionView: View {
             step("3", title: "建立个人基线", detail: "电量基线可用 \(validNights) 个有效历史夜晚（不含今天与昨天）；有记录即可初步计算，不再要求先满 14 夜。已有 Apple 健康历史直接参与；缺少基线时不推算心率压力。")
             if let snapshot = health.snapshot {
                 FlatRule(); Text("实际读取结果").font(.headline)
-                ForEach(snapshot.coverage) { row in HStack(alignment: .top) { Text(row.name); Spacer(); Text(row.count == 0 ? "暂无可读记录" : "\(row.days)天 · \(row.count)条").foregroundStyle(row.count == 0 ? PocketStyle.drain : PocketStyle.green) }.font(.caption) }
+                ForEach(snapshot.coverage) { row in HStack(alignment: .top) { Text(row.name); Spacer(); Text(row.readFailure != nil ? "读取失败" : row.count == 0 ? "暂无可读记录" : "\(row.days)天 · \(row.count)条").foregroundStyle(row.readFailure != nil || row.count == 0 ? PocketStyle.drain : PocketStyle.green) }.font(.caption) }
                 let activityDays = snapshot.energy.filter { $0.kcal != nil }.count
                 LabeledContent("活动能量", value: "\(activityDays) 天有统计").font(.caption)
                 Text(health.battery.message).font(.caption).foregroundStyle(.secondary)
                 NavigationLink("查看来源、采样时间与覆盖") { DataCoverage() }
             }
             if let notice = health.notice { Text(notice).font(.subheadline).foregroundStyle(PocketStyle.drain) }
-            Text("可选新增：步数、正念时段、睡眠呼吸率、睡眠腕温和血氧。用于状态背景与个人趋势。点下方按钮自行选择允许读取的项目；未允许的指标留空，原有功能仍可使用。") .font(.caption).foregroundStyle(.secondary)
+            Text("可选新增：静息能量、饮食能量、体重、体脂、去脂体重、身高，以及步数、正念、呼吸率、腕温和血氧。用于状态背景与个人趋势。点下方按钮自行选择允许读取的项目；未允许的指标留空，原有功能仍可使用。") .font(.caption).foregroundStyle(.secondary)
             Button(health.busy ? "正在读取…" : health.requested ? "重新请求读取权限" : "选择允许读取的项目") {
                 experience.toggleDemo(false, health: health)
                 Task { await health.connect() }
@@ -521,14 +945,88 @@ struct HealthConnectionView: View {
 }
 struct DataCoverage: View {
     @EnvironmentObject var health: HealthStore
-    var body: some View { List { if let snapshot = health.snapshot { Section { Text("最后读取 \(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))") }; ForEach(snapshot.coverage) { row in Section(row.name) { Text("\(row.days) 天 · \(row.count) 条"); ForEach(row.sources, id: \.self) { Text($0).font(.caption) }; if let date = row.lastSample { Text("最新 \(date.formatted(date: .abbreviated, time: .shortened))") } } } } else { Text("连接健康后查看真实数据来源。") }; Section { Text("系统无法直接区分读取被拒绝与没有记录。演示不伪装成真实覆盖。") } }.navigationTitle("数据覆盖").toolbar(.visible, for: .navigationBar) }
+    var body: some View { List { if let snapshot = health.snapshot { Section { Text("最后读取 \(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))") }; ForEach(snapshot.coverage) { row in Section(row.name) { if let failure = row.readFailure { Text(failure).foregroundStyle(PocketStyle.drain) } else { Text("\(row.days) 天 · \(row.count) 条") }; ForEach(row.sources, id: \.self) { Text($0).font(.caption) }; if let date = row.lastSample { Text("最新 \(date.formatted(date: .abbreviated, time: .shortened))") } } } } else { Text("连接健康后查看真实数据来源。") }; Section { Text("系统无法直接区分读取被拒绝与没有记录。演示不伪装成真实覆盖。") } }.navigationTitle("数据覆盖").toolbar(.visible, for: .navigationBar) }
+}
+struct StateScoreBreakdown:View {
+    var estimate:CurrentStateEstimate
+    private var effects:[CurrentStateFactor] {(estimate.factors ?? []).filter{$0.key != "prior"}}
+    private var extent:Double {max(10,ceil((effects.map{abs($0.points)}.max() ?? 0)/10)*10)}
+    var body:some View {
+        VStack(alignment:.leading,spacing:14) {
+            if let factors=estimate.factors {
+                HStack(alignment:.firstTextBaseline) {
+                    Text("从初始假设到当下参考").font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("\(estimate.value)").font(.system(size:32,weight:.medium)).monospacedDigit().foregroundStyle(PocketStyle.green)
+                }
+                Text("65 是尚未校准的初始假设，下面是已有信号带来的工程修正。").font(.caption).foregroundStyle(.secondary)
+                if !effects.isEmpty {
+                    Chart(effects) { factor in
+                        BarMark(x:.value("模型修正",factor.points),y:.value("依据",factor.title),height:.ratio(0.5))
+                            .foregroundStyle(factor.points<0 ? PocketStyle.drain:PocketStyle.green).cornerRadius(3)
+                            .accessibilityLabel(factor.title).accessibilityValue(String(format:"%+.2f 点",factor.points))
+                        RuleMark(x:.value("零",0)).foregroundStyle(PocketStyle.ink.opacity(0.25))
+                    }.chartXScale(domain:(-extent)...extent).chartLegend(.hidden)
+                        .frame(height:CGFloat(max(2,effects.count))*40)
+                        .accessibilityLabel("近期状态分数拆解；模型修正不是实际电量收支")
+                } else {
+                    Text("还没有足够的可比信号；此刻主要显示初始假设，参考范围较宽。").font(.caption)
+                }
+                ForEach(factors) { factor in
+                    DisclosureGroup {
+                        Text(factor.detail).font(.caption).foregroundStyle(.secondary)
+                        if let date=factor.observedAt {Text("观测 "+date.formatted(date:.abbreviated,time:.shortened)).font(.caption2)}
+                        if factor.baselineDays>0 {Text("同来源历史 \(factor.baselineDays) 个日期").font(.caption2)}
+                    } label: {
+                        HStack {
+                            Text(factor.title).font(.subheadline)
+                            Spacer()
+                            Text(String(format:"%+.2f",factor.points)).font(.subheadline.monospacedDigit())
+                                .foregroundStyle(factor.points<0 ? PocketStyle.drain:PocketStyle.green)
+                        }
+                    }.tint(PocketStyle.green)
+                }
+                Text("各项相加等于显示分数；它们不是已测得的身体电量变化，也不代表因果效应。睡眠片段的完整性未知时，不据此计算缺觉扣分。").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("这条旧摘要没有保存分数拆解。刷新后使用新版计算，不反向编造旧依据。").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
 }
 struct EstimateDetails: View {
     @EnvironmentObject private var health:HealthStore
     @EnvironmentObject private var experience:PocketExperience
     private var status:PocketStatus { experience.status(health) }
     var body: some View { List {
-        if experience.demo { DemoNote() }
+        if experience.demo || status.demo { DemoNote() }
+        if status.usesStateEstimate {
+            Section("近期状态与连续电量分开") {
+                Text(status.scoreMeaning.title).font(.headline)
+                Text(status.scoreMeaning.detail).font(.subheadline)
+                Text(status.message).font(.caption).foregroundStyle(.secondary)
+                if let estimate=status.stateEstimate {
+                    LabeledContent("实际使用",value:estimate.basis)
+                    LabeledContent("个人历史",value:"\(estimate.baselineDays) 个可比日")
+                    LabeledContent("观测时间",value:estimate.measuredAt.formatted(date:.abbreviated,time:.shortened))
+                    LabeledContent("参考范围（未校准）",value:"\(estimate.lower)–\(estimate.upper)")
+                    Text(estimate.note).font(.caption).foregroundStyle(.secondary)
+                }
+                Text("HRV 按同来源、同场景历史比较，活动背景会降低权重；没有基线时使用中性初始假设并扩大范围。以下电量输入保留用于排查，不代表当前状态估计。").font(.caption)
+            }
+        }
+        if status.usesStateEstimate,let estimate=status.stateEstimate {
+            Section("这个分数怎样组成") { StateScoreBreakdown(estimate:estimate) }
+        }
+        if let continuity = status.continuity {
+            Section("连续电量怎样承接") {
+                LabeledContent("本段起点",value:continuity.segmentStart.formatted(date:.abbreviated,time:.shortened))
+                LabeledContent("起点参考值",value:String(format:"%.0f / 100",continuity.initialValue))
+                LabeledContent("缺测分段",value:"\(continuity.segmentCount) 段")
+                LabeledContent("今天推断的非睡眠心率覆盖",value:String(format:"%.1f 小时",continuity.inferredHoursToday))
+                Text(continuity.note).font(.caption).foregroundStyle(.secondary)
+                Text("相邻时段承接电量，跨午夜不重置；超过六小时无有效时段记录会断开曲线。新的起点不计为恢复。心率覆盖推断只连接相隔不超过十分钟的采样；不会跨过整晚空档。").font(.caption)
+            }
+        }
         Section("估计的不确定性") {
             LabeledContent("内部估计范围",value:status.lower.flatMap { low in status.upper.map { "\(low)–\($0)" } } ?? "暂无估计")
             Text("范围越宽，越不适合单看一个数字安排训练。当前范围尚未按真实结果校准。").font(.caption).foregroundStyle(.secondary)
@@ -542,6 +1040,10 @@ struct EstimateDetails: View {
                 LabeledContent("可比睡眠 HRV 采样",value:"\(inputs.sleepHRVSamples ?? 0) 条")
                 LabeledContent("睡眠 HRV 调节",value:String(format:"%+.2f 点",inputs.sleepHRVAdjustment ?? 0))
                 LabeledContent("日间 HRV 额外消耗",value:String(format:"%.2f 点",inputs.awakeHRVDrain ?? 0))
+                if let fallback = inputs.workoutHeartFallbackDrain,fallback > 0 {
+                    LabeledContent("热量缺测时的训练心率参考",value:String(format:"%.2f 点",fallback))
+                    Text("仅在未读到有效活动热量的时段使用相邻不超过90秒的真实训练心率；不与热量叠加，未覆盖时段不补算。它仍是未校准的工程估计。").font(.caption).foregroundStyle(.secondary)
+                }
                 LabeledContent("已记录活动能量",value:String(format:"%.0f kcal",inputs.activeKcal))
                 LabeledContent("有数据的小时区间",value:String(format:"%.1f 小时",inputs.observedHours))
                 LabeledContent("缺少时间覆盖",value:String(format:"%.1f 小时",inputs.unobservedHours ?? 0))
@@ -549,8 +1051,17 @@ struct EstimateDetails: View {
                 Text("HRV 覆盖为 0 表示该项没有影响本次时段计算，不表示 HRV 为零。睡眠跨午夜部分归前一天；有数据的小时仍可能只有稀疏采样。").font(.caption).foregroundStyle(.secondary)
             } else { Text("刷新健康数据后显示计算输入。") }
         }
+        if !experience.demo {
+            Section("这个结果受起点影响多大") {
+                if let range = health.batteryAnchorSensitivity {
+                    LabeledContent("换两个起点重算",value:"\(range.low)–\(range.high)")
+                    Text("保持健康记录不变，把各观测片段的起点分别设为 35 和 65，得到上述两个结果。差距越大，当前分数越受初始假设影响。这不是置信区间，也不会改写实际电量。").font(.caption).foregroundStyle(.secondary)
+                } else { Text("有可计算的真实记录后展示起点敏感性。演示数据不作为个人验证。") }
+                NavigationLink("核对健康来源与读取时间") { DataCoverage() }
+            }
+        }
         Section("睡眠恢复曲线") { Text("采用逐渐接近 100 的恢复曲线，电量较低时补充较快，接近充足时变慢。睡眠 HRV 相对个人历史偏低、睡眠心率偏高时会降低速度。6 小时的恢复时间参数仍是待校准的工程假设，不保证睡够就到 100，也不是 Garmin 的公式。") }
- Section("身体电量") { Text("基于已有睡眠、活动、心率和睡眠时段 HRV 估算，有记录即可初步计算。睡眠 HRV 与更早的个人睡眠记录比较；心率偏高时降低睡眠补充。训练时不重复加算心率偏高消耗，也不视为清醒休息。小时活动能量不能证明整小时清醒；按时间消耗只作用于观测覆盖窗口。首次以固定 50 起步；起点和系数仍需个人校准。") }; Section("观测与范围") { Text("两小时没有新观测或跨日后隐藏当前值。曲线只显示已有观测，不插补采样空洞。范围是模型内部估算范围，不是经验证的置信区间。") }; Section("恢复与开源对照") { Text("恢复使用个人历史和状态滤波；Whoordan 的部分开源公式用于独立对照，许可为 Apache 2.0。身体电量借鉴 Garmin 公开的持续充放电思路；公式和系数是本 App 的实验实现，未经生理准确性验证。Apple 健康里的 SDNN 采样不能直接当成佳明的连续压力信号。") }; Section("使用方式") { Text("今日安排是你选择的计划，以实际感受为准。事件记录不改变生理分数，也不会直接产生习惯因果结论。") } }.scrollContentBackground(.hidden).background(PocketStyle.paper).navigationTitle("估计说明").toolbar(.visible, for: .navigationBar) }
+ Section("身体电量") { Text("基于已有睡眠、活动、心率和睡眠时段 HRV 估算，有记录即可初步计算。睡眠 HRV 与更早的个人睡眠记录比较；心率偏高时降低睡眠补充。训练读到活动热量时不重复加算心率消耗；热量缺测且有可比心率基线时，只对实际训练采样覆盖使用心率参考。训练不视为清醒休息。小时活动能量不能证明整小时清醒；按时间消耗只作用于观测覆盖窗口。起点只在首次记录或长时间缺测后建立；有合适信号时用当时的初步状态，否则用明确标记的 50 分假设。后续时段承接电量，不随每条 HRV 重置；起点和系数仍需个人校准。") }; Section("观测与范围") { Text("连续电量两小时没有新观测后隐藏当前值；跨午夜承接，缺少记录不会自动恢复或清零。曲线只显示已有观测，不插补采样空洞。范围是模型内部估算范围，不是经验证的置信区间。") }; Section("恢复与开源对照") { Text("恢复使用个人历史和状态滤波；Whoordan 的部分开源公式用于独立对照，许可为 Apache 2.0。身体电量借鉴 Garmin 公开的持续充放电思路；公式和系数是本 App 的实验实现，未经生理准确性验证。Apple 健康里的 SDNN 采样不能直接当成佳明的连续压力信号。") }; Section("使用方式") { Text("今日安排是你选择的计划，以实际感受为准。事件记录不改变生理分数，也不会直接产生习惯因果结论。") } }.scrollContentBackground(.hidden).background(PocketStyle.paper).navigationTitle("估计说明").toolbar(.visible, for: .navigationBar) }
 }
 struct WidgetInstructions: View {
     var body: some View { List { Section("iPhone 桌面") { Text("长按桌面空白 → 编辑 → 添加小组件 → 搜索 Recovery Pocket。支持小号、中号桌面组件及锁屏组件。点组件打开今日页。") }; Section("Apple Watch 表盘") { Text("安装 Watch App 后，长按表盘 → 编辑 → 复杂功能 → 选择 Recovery Pocket。形状取决于表盘槽位。") }; Section("更新与隐私") { Text("手机读取后保存摘要并同步手表。系统决定后台与组件刷新时机，不能保证实时。原始健康记录不上传云端；组件和手表显示计算摘要。") } }.navigationTitle("添加组件").toolbar(.visible, for: .navigationBar) }
@@ -589,6 +1100,7 @@ struct WorkoutImpactView: View {
                     Text("\(time(impact.workout.start))–\(time(impact.workout.end)) · \(Int(impact.workout.duration / 60)) 分钟").font(.subheadline)
                     Text(impact.workout.activeKcal.map { String(format: "活动能量 %.0f kcal", $0) } ?? "活动能量未读到").font(.caption)
                     Text("可比较时段 \(Int(impact.coveredSeconds / 60)) 分钟 · \(impact.workout.source)").font(.caption).foregroundStyle(.secondary)
+                    WorkoutCardioCard(workout:impact.workout)
                 }; FlatRule()
             }
             Text("这是训练时间与现有电量曲线的对应估计，不证明训练造成全部下降。小时内按时间比例分配；重叠训练平分对应下降，暂停也包含在时间窗口内。训练能量仅展示，不再额外扣分，避免与全天活动能量重复计算。") .font(.caption).foregroundStyle(.secondary)
@@ -610,7 +1122,7 @@ struct PocketBody: View {
     @AppStorage("bodyVisibleMetrics") private var visibleMetrics = "静息心率,睡眠心率,睡眠呼吸率,睡眠腕温,睡眠血氧,睡眠时长,步数"
     private var observations: [HRVObservation] { experience.demo ? DayHRVModel.demo() : health.snapshot?.hrvObservations ?? [] }
     private var latestHRV: HRVObservation? { observations.filter { $0.context == "安静候选" && Calendar.current.isDateInToday($0.end) }.max { $0.end < $1.end } }
-    private var latestNight: NightRecord? { experience.nights(health).filter { $0.sleepHours != nil }.max { $0.date < $1.date } }
+    private var latestNight: NightRecord? { experience.nights(health).filter { $0.sleepHours != nil && Calendar.current.isDateInToday($0.date) }.max { $0.date < $1.date } }
     private var recovery: RecoveryEstimate? { experience.estimates(health, target: sleepTarget).filter { $0.score != nil }.max { $0.date < $1.date } }
     private var steps: Double? { experience.demo ? 6420 : health.snapshot?.steps?.first { Calendar.current.isDateInToday($0.date) }?.count }
     var body: some View {
@@ -618,6 +1130,7 @@ struct PocketBody: View {
             PageHeader(title: "身体"); DemoNote()
             hrvOverview
             healthGrid
+            NavigationLink { EnergyBudgetView() } label: { overviewRow("能量收支", subtitle:"静息＋活动－摄入 · Keep 与拍照饮食", icon:"flame") }
             HStack { Text("身体指标").font(.title2.weight(.semibold)); Spacer(); Button("编辑") { metricSettings = true }.frame(minHeight:44) }
             BodyMetricCards(visible:visibleMetrics)
             FlatRule()
@@ -912,3 +1425,651 @@ private struct BodyMetricDetail:View {
         NavigationLink("健康连接与读取检查") { HealthConnectionView() }.buttonStyle(.bordered)
     }.padding(24) }.safeAreaPadding(.bottom,24).background(PocketStyle.paper).navigationTitle(name).toolbar(.visible,for:.navigationBar) }
 }
+
+// MARK: - 恢复–负荷双环
+struct DualRing: View {
+    var recovery: Int?
+    var strain: Double?
+    var diameter: CGFloat = 116
+    var body: some View {
+        HStack(spacing: 24) {
+            ring(title: "恢复", fraction: recovery.map { Double($0) / 100 }, display: recovery.map(String.init) ?? "—", unit: "/ 100", color: PocketStyle.green)
+            ring(title: "负荷", fraction: strain.map { $0 / StrainEngine.ceiling }, display: strain.map { String(format: "%.1f", $0) } ?? "—", unit: "/ 21", color: PocketStyle.drain)
+        }
+    }
+    private func ring(title: String, fraction: Double?, display: String, unit: String, color: Color) -> some View {
+        let value = min(1, max(0, fraction ?? 0))
+        return VStack(spacing: 8) {
+            ZStack {
+                Circle().stroke(PocketStyle.ink.opacity(0.08), lineWidth: 10)
+                if value > 0 {
+                    Circle().trim(from: 0, to: value)
+                        .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                VStack(spacing: 0) {
+                    Text(display).font(.system(size: 26, weight: .light)).monospacedDigit().foregroundStyle(PocketStyle.ink)
+                    Text(unit).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }.frame(width: diameter, height: diameter)
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) \(display) \(unit)")
+    }
+}
+
+// MARK: - 今日决策卡
+struct DecisionCard: View {
+    var decision: DailyDecision
+    var brief: MorningBrief
+    var briefBusy: Bool
+    var briefNotice: String?
+    var onRefreshBrief: () -> Void
+    var onOpenAIStatus: () -> Void
+    var onRecord: (String) -> Void
+    @State private var showCaveat = false
+    private var briefBadge: String { brief.source == .local ? "本地表述" : brief.source.short + "整理" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("今日决策").font(.subheadline.weight(.medium)).foregroundStyle(PocketStyle.ink)
+                Spacer(minLength: 8)
+                Button { onOpenAIStatus() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: brief.source == .local ? "leaf" : "sparkles").font(.system(size: 10))
+                        Text(briefBadge).font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(PocketStyle.green)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(PocketStyle.green.opacity(0.12), in: Capsule())
+                }.buttonStyle(.plain).accessibilityLabel("查看 AI 接入状态")
+                Text(decision.level.rawValue)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(decision.level == .unknown ? PocketStyle.ink.opacity(0.65) : .white)
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(decision.levelColor, in: Capsule())
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                Text(brief.headline).font(.system(size: 23, weight: .semibold)).foregroundStyle(PocketStyle.ink).fixedSize(horizontal: false, vertical: true)
+                Text(brief.body).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            // 归属信息跟着文字走：谁写的这句话，就标在这句话下面。
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "text.quote").font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(brief.source == .local ? "本地解读 · 查看依据与来源" : "AI 整理 · 事实来自本地").font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    DisclosureGroup("生成详情") { Text(brief.note); if let briefNotice { Text(briefNotice) } }.font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 6)
+                if briefBusy {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button { onRefreshBrief() } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(PocketStyle.green).padding(6)
+                            .background(PocketStyle.green.opacity(0.12), in: Circle())
+                    }.buttonStyle(.plain).accessibilityLabel("换个说法")
+                }
+            }
+            DualRing(recovery: decision.recovery, strain: decision.strain).frame(maxWidth: .infinity)
+
+            VStack(spacing: 0) {
+                ForEach(Array(decision.actions.enumerated()), id: \.element.id) { index, action in
+                    if index > 0 { Rectangle().fill(PocketStyle.rule).frame(height: 0.5) }
+                    HStack(alignment: .top, spacing: 13) {
+                        Image(systemName: action.icon)
+                            .font(.system(size: 17))
+                            .frame(width: 28, height: 28)
+                            .foregroundStyle(action.lead ? PocketStyle.green : PocketStyle.ink.opacity(0.7))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(action.headline).font(.subheadline.weight(.medium)).foregroundStyle(PocketStyle.ink).fixedSize(horizontal: false, vertical: true)
+                            Text(action.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 6)
+                        Button { onRecord(action.eventKind) } label: {
+                            Text("记录").font(.caption.weight(.medium)).foregroundStyle(PocketStyle.green)
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(PocketStyle.green.opacity(0.12), in: Capsule())
+                        }.buttonStyle(.plain).accessibilityLabel("记录\(action.kind.rawValue)")
+                    }.padding(.vertical, 13)
+                }
+            }
+
+            if let budget = decision.budget {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("能量预算").font(.caption.weight(.medium)).foregroundStyle(PocketStyle.ink)
+                        Spacer()
+                        Text(budget.note).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(PocketStyle.ink.opacity(0.07))
+                            Capsule().fill(PocketStyle.green.opacity(0.55)).frame(width: max(0, geo.size.width * Double(budget.remaining) / 100))
+                        }
+                    }.frame(height: 8)
+                }
+            }
+
+            if let insight = decision.insight {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "sparkles").font(.caption).foregroundStyle(PocketStyle.mint).padding(.top, 2)
+                    Text(insight).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(PocketStyle.green.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            }
+
+            Button { showCaveat.toggle() } label: {
+                HStack(spacing: 5) { Image(systemName: "info.circle"); Text("为什么这样建议") }.font(.caption2).foregroundStyle(.secondary)
+            }.buttonStyle(.plain)
+            if showCaveat { Text(decision.caveat).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        }
+        .padding(22).frame(maxWidth: .infinity, alignment: .leading)
+        .background(PocketStyle.green.opacity(0.055), in: RoundedRectangle(cornerRadius: 24))
+    }
+}
+
+// MARK: - 负荷页
+struct PocketLoadView: View {
+    @EnvironmentObject private var health: HealthStore
+    @EnvironmentObject private var experience: PocketExperience
+    @AppStorage("sleepTarget") private var target = 8.0
+    @AppStorage("dailyIntentV4") private var intent = "工作"
+    @State private var selection: Date?
+    @State private var effortComposer=false
+
+    private var allPoints: [BatteryPoint] { experience.demo ? experience.demoBattery.points : health.batteryHistory }
+    private var todayWorkouts: [PocketWorkout] {
+        let start = Calendar.current.startOfDay(for: Date())
+        let rows = experience.demo ? WorkoutAnalysis.demoWorkouts(day: start) : (health.snapshot?.workouts ?? [])
+        return rows.filter { $0.end > $0.start && $0.end > start && $0.end <= Date() }
+    }
+    private var todayMinutes: Double {
+        RecoveryEngine.merged(todayWorkouts.map { SleepInterval(start:$0.start,end:$0.end) },from:Calendar.current.startOfDay(for:Date()),to:Date()).reduce(0.0) { $0+$1.end.timeIntervalSince($1.start)/60 }
+    }
+    private var todayKcal: Double? {
+        if experience.demo { return 420 }
+        return health.snapshot?.energy.first { Calendar.current.isDate($0.date, inSameDayAs: Date()) }?.kcal
+    }
+    private var strain: Double? { StrainEngine.strain(kcal: todayKcal, workoutMinutes: todayMinutes) }
+    private var effortEntries:[PocketEvent] { experience.visibleEvents.filter { Calendar.current.isDateInToday($0.date) && $0.date <= Date() && $0.sessionLoad != nil } }
+    private var series: [LoadBarRow] {
+        let calendar = Calendar.current, today = calendar.startOfDay(for: Date())
+        if experience.demo {
+            return (0..<28).map { offset in
+                let day = calendar.date(byAdding: .day, value: -offset, to: today)!
+                let wave = sin(Double(offset) * 0.7)
+                return LoadBarRow(day: day, kcal: offset == 0 ? 420 : 430 + wave * 190)
+            }
+        }
+        return (health.snapshot?.energy ?? []).map { LoadBarRow(day: calendar.startOfDay(for: $0.date), kcal: $0.kcal) }
+    }
+    private var acwr: LoadRatio { StrainEngine.acwr(daily: series, now: Date()) }
+    private var recentSeven: [LoadBarRow] { Array(series.sorted { $0.day < $1.day }.suffix(7)) }
+    private var estimate: RecoveryEstimate? {
+        guard experience.demo || health.snapshot.map({ Date().timeIntervalSince($0.fetchedAt) < 21600 }) == true else { return nil }
+        return experience.estimates(health, target: target).filter { $0.score != nil && Calendar.current.isDateInToday($0.date) }.last
+    }
+    private var lastNight: NightRecord? { experience.nights(health).filter { $0.sleepHours != nil && Calendar.current.isDateInToday($0.date) }.max { $0.date < $1.date } }
+    private var decision: DailyDecision {
+        DecisionEngine.make(estimate: estimate, status: experience.status(health), lastNight: lastNight, todayKcal: todayKcal,
+                            strain: strain, sleepTarget: target, intent: intent, now: Date())
+    }
+    private var acwrColor: Color {
+        guard let ratio = acwr.ratio else { return PocketStyle.ink.opacity(0.45) }
+        if ratio < 0.8 { return PocketStyle.mint }
+        if ratio <= 1.3 { return PocketStyle.green }
+        return PocketStyle.drain
+    }
+    private func strainColor(_ value: Double) -> Color { value < 8 ? PocketStyle.green : value < 14 ? PocketStyle.mint : PocketStyle.drain }
+
+    var embedded = false
+    var body: some View {
+        Group { if embedded { content } else { NavigationStack { content } } }
+    }
+    private var content: some View {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    PageHeader(title: "负荷")
+                    Text("看活动能量，也回顾训练与体感。").font(.subheadline).foregroundStyle(.secondary).padding(.top, 4)
+                    HStack { DemoNote(); Spacer() }.padding(.top, 6)
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack { Text("今日活动负荷").font(.subheadline.weight(.medium)); Spacer(); Text("活动能量代理 · 未校准").font(.caption).foregroundStyle(.secondary) }
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(strain.map { String(format: "%.1f", $0) } ?? "—").font(.system(size: 72, weight: .light)).monospacedDigit().foregroundStyle(PocketStyle.drain)
+                            Text("/ 21").font(.subheadline).foregroundStyle(.secondary)
+                            Spacer()
+                            if let strain { Text("负荷偏\(StrainEngine.zone(strain))").font(.subheadline.weight(.medium)).foregroundStyle(strainColor(strain)) }
+                        }
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(PocketStyle.ink.opacity(0.07))
+                                Capsule().fill(PocketStyle.drain).frame(width: max(0, geo.size.width * min(1, (strain ?? 0) / StrainEngine.ceiling)))
+                            }
+                        }.frame(height: 10)
+                        Text(todayKcal.map { String(format: "来自今日活动能量 %.0f kcal", $0) } ?? "今天还没有活动能量记录，负荷按已有观测估计。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(22).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PocketStyle.green.opacity(0.055), in: RoundedRectangle(cornerRadius: 24))
+                    .padding(.top, 16)
+
+                    FlatRule()
+
+                    VStack(alignment:.leading,spacing:14) {
+                        Text("训练体感负荷").font(.headline)
+                        if effortEntries.isEmpty {
+                            Text("在训练记录中补充整次训练强度与实际时长，得到独立于热量的主观负荷。").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(effortEntries) { event in
+                            HStack { Text(event.date.formatted(date:.omitted,time:.shortened));Spacer();Text(String(format:"%d × %.0f 分钟 = %.0f",event.sessionRPE!,event.trainingMinutes!,event.sessionLoad!)).foregroundStyle(PocketStyle.green) }.font(.subheadline)
+                        }
+                        Button("记录训练体感") { effortComposer=true }.buttonStyle(.bordered)
+                        Text("强度0–10 × 时长，单位为任意负荷单位；这是手动训练记录，不与Apple健康的热量或心率负荷相加。").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    FlatRule()
+                    VStack(alignment:.leading,spacing:14) {
+                        HStack { Text("训练强度与覆盖").font(.headline); Spacer();Text("实际心率").font(.caption).foregroundStyle(.secondary) }
+                        if todayWorkouts.isEmpty {
+                            Text("尚无已同步的 Apple 健康训练记录；手动体感记录仍保留在上方。").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(todayWorkouts) { workout in WorkoutCardioCard(workout:workout) }
+                        Text("只计算相邻不超过 90 秒的心率记录；空白时段不补算。强度参考与活动能量分别展示，不重复相加，也不推断力量训练的肌肉负荷。").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    FlatRule()
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack { Text("训练负荷比 ACWR").font(.headline); Spacer(); Text(acwr.zone).font(.subheadline.weight(.medium)).foregroundStyle(acwrColor) }
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(acwr.ratio.map { String(format: "%.2f", $0) } ?? "—").font(.system(size: 34, weight: .light)).monospacedDigit()
+                            Text("最近 7 个完整日 : 28 个完整日").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(acwr.note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text("急性 \(Int(acwr.acute.rounded())) kcal · 慢性 \(Int(acwr.chronic.rounded())) kcal · 已记录 \(acwr.acuteDays) / \(acwr.chronicDays) 天，缺失日不计为零。")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    FlatRule()
+
+                    HStack { Text("近 7 日负荷").font(.headline); Spacer(); Text("活动能量").font(.caption).foregroundStyle(.secondary) }
+                    if recentSeven.contains(where: { $0.kcal != nil }) {
+                        Chart(recentSeven) { row in
+                            if let kcal = row.kcal {
+                                BarMark(x: .value("日期", row.day, unit: .day), y: .value("活动能量", kcal)).foregroundStyle(PocketStyle.green.opacity(0.75))
+                            }
+                        }
+                        .chartYAxis { AxisMarks(position: .leading) }
+                        .chartXAxis { AxisMarks(values: .stride(by: .day)) { tick in AxisValueLabel { if let date = tick.as(Date.self) { Text(date.formatted(.dateTime.month(.defaultDigits).day())) } } } }
+                        .frame(height: 160).padding(.top, 14)
+                    } else {
+                        Text("积累几天活动记录后，这里显示每日负荷。").font(.caption).foregroundStyle(.secondary).padding(.top, 12)
+                    }
+
+                    FlatRule()
+
+                    if let lead = decision.actions.first {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("基于恢复 × 负荷的建议").font(.headline)
+                            HStack(alignment: .top, spacing: 13) {
+                                Image(systemName: lead.icon).font(.system(size: 18)).frame(width: 28, height: 28).foregroundStyle(PocketStyle.green)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(lead.headline).font(.subheadline.weight(.medium))
+                                    Text(lead.reason).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            Text("恢复 \(decision.recovery.map(String.init) ?? "—") · 负荷 \(strain.map { String(format: "%.1f", $0) } ?? "—") / 21 · \(acwr.zone)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    FlatRule()
+
+                    HStack { Text("今日电量曲线").font(.headline); Spacer(); Text("训练时段标注").font(.caption).foregroundStyle(.secondary) }
+                    EnergyTimeline(points: allPoints, day: Calendar.current.startOfDay(for: Date()), workouts: todayWorkouts, selection: $selection, height: 190).padding(.top, 14)
+
+                    FlatRule()
+                    Text("负荷与负荷比基于已记录的活动能量，是实验估计，不是 Whoop 的 Strain 模型，也未个体校准。缺失日期不补零；负荷比需要足够历史才显示。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }.padding(24).padding(.bottom, 12)
+            }.safeAreaPadding(.bottom, 24).background(PocketStyle.paper).foregroundStyle(PocketStyle.ink).toolbar(embedded ? .visible : .hidden, for: .navigationBar).navigationTitle("活动负荷").navigationBarTitleDisplayMode(.inline)
+                .refreshable { if experience.demo { experience.toggleDemo(true, health: health) } else { await health.refresh() } }
+                .sheet(isPresented:$effortComposer) { EventComposer(defaultKind:"训练") }
+    }
+}
+
+// Native page gestures remain separate from the outer vertical ScrollView.
+private struct DailyPageHeightKey: PreferenceKey {
+    static var defaultValue: [Date: CGFloat] = [:]
+    static func reduce(value: inout [Date: CGFloat], nextValue: () -> [Date: CGFloat]) { value.merge(nextValue()) { _, next in next } }
+}
+private struct PocketPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.72 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+private struct DailyEnergyPage: View, Equatable {
+    // Revision comes from the published snapshot/status, never from a drag frame.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.day == rhs.day && lhs.contentRevision == rhs.contentRevision &&
+        lhs.status.computedAt == rhs.status.computedAt && lhs.headline == rhs.headline &&
+        lhs.compact == rhs.compact && lhs.demo == rhs.demo && lhs.busy == rhs.busy
+    }
+    let day: Date
+    let status: PocketStatus
+    let points: [BatteryPoint]
+    let workouts: [PocketWorkout]
+    let headline: String
+    let compact: Bool
+    let demo: Bool
+    let busy: Bool
+    let refresh: () -> Void
+    let contentRevision: Date
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selection: Date?
+    private var isToday: Bool { Calendar.current.isDateInToday(day) }
+    private var isFuture: Bool { day > Calendar.current.startOfDay(for: Date()) }
+    private var end: Date { Calendar.current.date(byAdding: .day, value: 1, to: day)! }
+    private var dayPoints: [BatteryPoint] { points.filter { point in
+        let withinDay = point.belongs(to:day,end:end,instant:status.usesStateEstimate)
+        return withinDay && point.date <= Date() && point.value.map { $0.isFinite && (0...100).contains($0) } == true
+    } }
+    private var stats: DailyBatteryStatistics {
+        if status.usesStateEstimate {
+            let values = dayPoints.compactMap(\.value)
+            return DailyBatteryStatistics(latest: dayPoints.max { $0.date < $1.date }, minimum: values.min(), maximum: values.max(), charged: 0, drained: 0, coveredSeconds: 0)
+        }
+        return DailyBatteryStatistics.calculate(points: points, day: day, now: Date())
+    }
+    private var dayWorkouts: [PocketWorkout] { workouts.filter { $0.start < end && $0.end > day && $0.end <= Date() } }
+    private func smallStat(_ label: String, _ value: String, color: Color = PocketStyle.ink) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 20, weight: .medium)).monospacedDigit().foregroundStyle(color)
+                .contentTransition(.numericText()).animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: value)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if !compact {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    let value = isFuture ? nil : isToday ? status.displayValue(at: context.date) : stats.latest?.value.map { Int($0.rounded()) }
+                    let observed = isToday ? status.displayDate : stats.latest?.date
+                    let stale = isToday && value == nil && observed != nil
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Label(status.usesStateEstimate && !isToday ? "历史状态":status.scoreMeaning.title,systemImage:status.scoreMeaning.symbol).font(.subheadline.weight(.medium))
+                            Spacer()
+                            NavigationLink { EstimateDetails() } label: {
+                                Image(systemName: "info.circle").font(.system(size: 17)).frame(width: 44, height: 44)
+                            }.foregroundStyle(.white.opacity(0.8)).accessibilityLabel("查看状态与电量的计算依据")
+                        }
+                        HStack(alignment: .bottom, spacing: 16) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(value.map(String.init) ?? "—").font(.system(size: 76, weight: .light, design: .rounded)).monospacedDigit()
+                                    .contentTransition(.numericText(value: Double(value ?? 0)))
+                                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: value)
+                                if value != nil { Text("/100").font(.caption).opacity(0.8).padding(.bottom, 6) }
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: status.usesStateEstimate ? "waveform.path" : "bolt.fill")
+                                .font(.system(size: 34, weight: .ultraLight)).foregroundStyle(PocketStyle.mint).padding(.bottom, 16)
+                                .accessibilityHidden(true)
+                        }
+                        Text(isFuture ? "明天的记录，明天见" : value == nil ? (stale ? "等待新的健康信号" : "这一天还没有状态记录") : status.usesStateEstimate ? (isToday ? status.scoreMeaning.headline : "当天最后状态记录") : (isToday ? headline : "当天最后电量估计"))
+                            .font(.headline).fixedSize(horizontal: false, vertical: true)
+                        if let value {
+                            GeometryReader { geometry in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.white.opacity(0.14))
+                                    Capsule().fill(PocketStyle.mint).frame(width: geometry.size.width * Double(value) / 100)
+                                }
+                            }.frame(height: 5)
+                        }
+                        HStack(alignment: .top) {
+                            Text(status.scoreMeaning.qualifier).font(.system(size: 10))
+                            Spacer()
+                            if let observed { Text((stale ? "上次 " : isToday || status.usesStateEstimate ? "观测 " : "截至 ") + observed.formatted(.dateTime.month().day()) + String(format: " %02d:%02d", Calendar.current.component(.hour, from: observed), Calendar.current.component(.minute, from: observed))).font(.system(size: 10)).multilineTextAlignment(.trailing) }
+                        }.opacity(0.86)
+                    }.foregroundStyle(.white).padding(20)
+                        .background {
+                            RoundedRectangle(cornerRadius: 28).fill(PocketStyle.green.gradient)
+                                .overlay(alignment: .topTrailing) {
+                                    Circle().stroke(Color.white.opacity(0.07), lineWidth: 28).frame(width: 170, height: 170).offset(x: 70, y: -60)
+                                }.clipShape(RoundedRectangle(cornerRadius: 28))
+                        }
+                    if isToday, status.usesStateEstimate, let estimate = status.stateEstimate {
+                        DisclosureGroup {
+                            Text("参考范围 \(estimate.lower)–\(estimate.upper) · 未校准\n" + estimate.note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                            DisclosureGroup("查看分数拆解") {StateScoreBreakdown(estimate:estimate).padding(.vertical,10)}
+                            if !demo {
+                                Button(busy ? "正在读取…" : "刷新健康数据", action: refresh).font(.subheadline).frame(minHeight: 44).disabled(busy)
+                                Text("可在手表心率 App 测量，待同步后刷新。").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        } label: { Label(status.evidenceLabel, systemImage: "info.circle").font(.caption) }.tint(PocketStyle.green).padding(.top, 12)
+                    }
+                    if stale { Text("已超过观测有效期；上次估计不作为当前状态。").font(.caption).foregroundStyle(.secondary).padding(.top, 8) }
+                    if value == nil, !isFuture { NavigationLink("检查健康连接与数据") { HealthConnectionView() }.font(.subheadline).frame(minHeight: 44) }
+                }
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Text(status.usesStateEstimate ? "一天的状态" : "一天的节奏").font(.system(size: 19, weight: .semibold))
+                    Spacer()
+                    Text("00:00 – 24:00").font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                }
+                if status.usesStateEstimate {
+                    if dayPoints.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Image(systemName: "waveform.path").font(.title2).foregroundStyle(PocketStyle.green.opacity(0.5))
+                            Text(isFuture ? "未来时段保持留白" : "没有可用的观测点").font(.subheadline)
+                            Text("缺失不会记成 0；有新信号时再显示。").font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+                    } else {
+                        Chart(dayPoints) { point in
+                            if let value = point.value { PointMark(x: .value("时间", point.date), y: .value("状态", value)).foregroundStyle(PocketStyle.green).symbolSize(32) }
+                        }.chartXScale(domain: day...end).chartYScale(domain: 0...100)
+                            .chartXAxis { AxisMarks(values: .stride(by: .hour, count: 6)) { tick in
+                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 4]))
+                                AxisValueLabel { if let date = tick.as(Date.self) { Text(String(format: "%02d:00", Calendar.current.component(.hour, from: date))) } }
+                            } }
+                            .chartYAxis { AxisMarks(position: .leading, values: [0, 50, 100]) }
+                            .frame(height: 160).accessibilityLabel("当天状态观测散点图；缺失时段留空。")
+                    }
+                } else {
+                    EnergyTimeline(points: points, day: day, workouts: dayWorkouts, selection: $selection, height: 160)
+                }
+                Rectangle().fill(PocketStyle.rule).frame(height: 0.5)
+                HStack(spacing: 12) {
+                    if status.usesStateEstimate {
+                        smallStat("当天最高", stats.maximum.map { String(Int($0.rounded())) } ?? "—", color: PocketStyle.green)
+                        smallStat("当天最低", stats.minimum.map { String(Int($0.rounded())) } ?? "—")
+                        smallStat("观测记录", "\(dayPoints.count) 次")
+                    } else {
+                        smallStat("补充", stats.coveredSeconds > 0 ? String(format: "+%.1f", stats.charged) : "—", color: PocketStyle.green)
+                        smallStat("消耗", stats.coveredSeconds > 0 ? String(format: "−%.1f", stats.drained) : "—", color: PocketStyle.drain)
+                        smallStat("可比较", String(format: "%.1f h", stats.coveredSeconds / 3600))
+                    }
+                }
+                Text(status.usesStateEstimate ? "每个点对应一次已有信号，不换算为电量收支。" : "轻点曲线查看区间；缺失时段不补算。")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if !status.usesStateEstimate {
+                    NavigationLink { EnergyInsightsView(day: day) } label: {
+                        HStack { Text("查看消耗时段与训练影响"); Spacer(); Image(systemName: "arrow.up.right") }.font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                    }
+                }
+            }.padding(18).background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 24))
+                .overlay { RoundedRectangle(cornerRadius: 24).stroke(PocketStyle.green.opacity(0.07), lineWidth: 0.5) }
+        }.padding(.horizontal, 1).padding(.bottom, 4)
+    }
+}
+
+/// Reject vertical movement before recognition so the enclosing scroll view keeps its pan.
+/// The marker never intercepts taps; the window recognizer is restricted to its visible bounds.
+private struct CalendarHorizontalPan: UIViewRepresentable {
+    var enabled: Bool
+    var changed: (CGFloat) -> Void
+    var ended: (CGFloat, CGFloat, Bool) -> Void
+    func makeUIView(context: Context) -> Marker { Marker() }
+    func updateUIView(_ view: Marker, context: Context) { view.changed = changed; view.ended = ended; view.setEnabled(enabled) }
+    static func dismantleUIView(_ view: Marker, coordinator: ()) { view.detach() }
+    final class Marker: UIView, UIGestureRecognizerDelegate {
+        var changed: ((CGFloat) -> Void)?
+        var ended: ((CGFloat, CGFloat, Bool) -> Void)?
+        private weak var attachedWindow: UIWindow?
+        private var touchOrigin: CGPoint?
+        private lazy var pan: UIPanGestureRecognizer = {
+            let gesture = UIPanGestureRecognizer(target: self, action: #selector(handle(_:)))
+            gesture.delegate = self; gesture.cancelsTouchesInView = false; gesture.maximumNumberOfTouches = 1
+            return gesture
+        }()
+        override init(frame: CGRect) { super.init(frame: frame); isUserInteractionEnabled = false; isAccessibilityElement = false }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard attachedWindow !== window else { return }
+            detach(); window?.addGestureRecognizer(pan); attachedWindow = window
+        }
+        func detach() { attachedWindow?.removeGestureRecognizer(pan); attachedWindow = nil }
+        func setEnabled(_ enabled: Bool) { pan.isEnabled = enabled }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let window, !isHidden, alpha > 0, !bounds.isEmpty,
+                  bounds.contains(touch.location(in: self)),
+                  window.bounds.contains(touch.location(in: window)),
+                  window.rootViewController?.presentedViewController == nil else { return false }
+            var ancestor = superview
+            while let view = ancestor {
+                if view.isHidden || view.alpha <= 0 { return false }
+                ancestor = view.superview
+            }
+            touchOrigin = touch.location(in: window)
+            return true
+        }
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let window, let origin = touchOrigin else { return false }
+            let point = pan.location(in: window)
+            return abs(point.x - origin.x) > abs(point.y - origin.y) * 1.3
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+        @objc private func handle(_ gesture: UIPanGestureRecognizer) {
+            guard let window, let origin = touchOrigin else { return }
+            let dx = gesture.location(in: window).x - origin.x
+            switch gesture.state {
+            case .began, .changed: changed?(dx)
+            case .ended: ended?(dx, dx + gesture.velocity(in: self).x * 0.15, false)
+            case .cancelled, .failed: ended?(0, 0, true)
+            default: break
+            }
+        }
+    }
+}
+
+/// Drag offsets are local to this small view. Moving a finger must not invalidate
+/// the calendar, recovery model, coach evidence, and every section of the home.
+private struct DailyEnergyPager: View {
+    @Binding var day: Date
+    let status: PocketStatus
+    let points: [BatteryPoint]
+    let headline: String
+    let workouts: [PocketWorkout]
+    let demo: Bool
+    let busy: Bool
+    let compact: Bool
+    let calendarDays: [Date]
+    let revision: Date
+    let refresh: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pageHeights: [Date: CGFloat] = [:]
+    @State private var pagingOffset: CGFloat = 0
+    @State private var pagerActive = false
+    @State private var pagingToken: UUID?
+    private var dateMotion: Animation? { reduceMotion ? nil : .spring(duration: 0.42, bounce: 0.08) }
+    private func selectDay(_ date: Date) { day = Calendar.current.startOfDay(for: date) }
+    var body: some View {
+        let adjacent = [-1, 0, 1].compactMap { Calendar.current.date(byAdding: .day, value: $0, to: day) }
+        return GeometryReader { geometry in
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(adjacent, id: \.self) { date in
+                    DailyEnergyPage(day: date, status: status, points: points,
+                                    workouts: demo ? WorkoutAnalysis.demoWorkouts(day: date) : workouts,
+                                    headline: headline, compact: compact, demo: demo, busy: busy,
+                                    refresh: refresh, contentRevision: revision).equatable()
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background { GeometryReader { measured in Color.clear.preference(key: DailyPageHeightKey.self, value: [date: measured.size.height]) } }
+                        .frame(width: geometry.size.width, alignment: .topLeading)
+                        .accessibilityHidden(date != day)
+                }
+            }.frame(width: geometry.size.width * 3, alignment: .topLeading)
+                .offset(x: -geometry.size.width + pagingOffset)
+                .frame(width: geometry.size.width, alignment: .topLeading).clipped()
+                .contentShape(Rectangle())
+                .background {
+                    CalendarHorizontalPan(enabled: pagerActive, changed: { dx in
+                        guard pagingToken == nil else { return }
+                        let offset = max(-geometry.size.width, min(geometry.size.width, dx))
+                        let next = Calendar.current.date(byAdding: .day, value: offset > 0 ? -1 : 1, to: day)!
+                        pagingOffset = reduceMotion ? 0 : calendarDays.contains(next) ? offset : offset * 0.12
+                    }, ended: { dx, projected, cancelled in
+                        finishPageDrag(dx: cancelled ? 0 : dx, projected: cancelled ? 0 : projected, width: geometry.size.width)
+                    })
+                }
+        }.frame(height: pageHeights[day] ?? 580).clipped()
+            .onPreferenceChange(DailyPageHeightKey.self) { measured in
+                let changed = measured.filter { abs((pageHeights[$0.key] ?? 0) - $0.value) > 0.5 }
+                if !changed.isEmpty { pageHeights.merge(changed) { _, new in new } }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: pageHeights[day])
+            .onChange(of: day) { _, _ in
+                pagingToken = nil
+                var transaction = Transaction(animation: nil); transaction.disablesAnimations = true
+                withTransaction(transaction) { pagingOffset = 0 }
+            }
+            .onAppear { pagerActive = true }
+            .onDisappear { pagerActive = false; pagingToken = nil; pagingOffset = 0 }
+            .accessibilityIdentifier("daily-energy-pager")
+    }
+    private func finishPageDrag(dx: CGFloat, projected: CGFloat, width: CGFloat) {
+        guard pagingToken == nil else { return }
+        let enough = abs(dx) > width * 0.22 || abs(projected) > width * 0.42
+        guard enough,
+              let next = Calendar.current.date(byAdding: .day, value: dx > 0 ? -1 : 1, to: day), calendarDays.contains(next) else {
+            if pagingOffset != 0 { withAnimation(dateMotion) { pagingOffset = 0 } }
+            return
+        }
+        if reduceMotion { selectDay(next); return }
+        let token = UUID(), original = day
+        pagingToken = token
+        withAnimation(.easeOut(duration: 0.22), completionCriteria: .logicallyComplete) {
+            pagingOffset = dx > 0 ? width : -width
+        } completion: {
+            guard pagingToken == token, day == original else { return }
+            var transaction = Transaction(animation: nil); transaction.disablesAnimations = true
+            withTransaction(transaction) { day = next; pagingOffset = 0; pagingToken = nil }
+        }
+    }
+
+}
+
+#if targetEnvironment(simulator)
+/// RAM-only clock-independent coverage fixture for the isolated QA simulator.
+private enum ShadowCoverageFixture {
+    static func make(now:Date=Date())->ShadowReplay? {
+        let end=now.addingTimeInterval(-60),start=end.addingTimeInterval(-3*3600)
+        let rows=(0..<3).map { index -> BatteryHour in
+            let lower=start.addingTimeInterval(Double(index)*3600),upper=lower.addingTimeInterval(3600)
+            let training=index==1 ? 0.5:1.0,minutes=index==2 ? 30:Int(training*60)
+            let samples=(0...minutes).map{WorkoutHeartSample(date:lower.addingTimeInterval(Double($0)*60),bpm:160,source:"synthetic-coverage-watch")}
+            let spans=WorkoutHeartFallback.make(samples:samples,windows:[(lower,lower.addingTimeInterval(training*3600))],start:lower,end:upper,now:now,reference:60,source:"synthetic-coverage-watch")
+            return BatteryHour(start:lower,end:upper,sleepHours:0,activeKcal:350*training,heartRate:160,heartRateCount:minutes+1,heartRateCoverageHours:Double(minutes)/60,workoutHours:training,personalHR:60,awakeHeartRate:160,awakeHeartRateCount:minutes+1,awakeHeartRateCoverageHours:Double(minutes)/60,workoutHeartSpans:spans)
+        }
+        let origin=BatteryOrigin(bucketStart:start,date:start,value:80,uncertainty:30,reason:"合成覆盖验收起点")
+        let ledger=BatteryLedger(baselineHR:60,hours:rows,sourceKey:"synthetic-coverage-watch",continuousVersion:1,continuousOrigins:[origin])
+        var replay=ShadowReplayEngine.replay(ledger:ledger,inputDigest:String(repeating:"c",count:64),now:now)
+        replay?.baseline.demo=true;replay?.candidate.demo=true
+        return replay
+    }
+}
+#endif

@@ -31,6 +31,17 @@
 		E3FFB195249B827D345DB35A /* Widgets/PocketWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9312C1BA7BFD4C8F3ECA58A /* Widgets/PocketWidgets.swift */; };
 		F71DC9085CCA9EF0F4A48EBE /* Shared/StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523434939763782ED4FBA458 /* Shared/StatusStore.swift */; };
 		F7F3117E4B76A1E5DA100C15 /* Shared/BatteryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF5409BD82F07153CECBEAA /* Shared/BatteryModel.swift */; };
+		B035534B1A9C4978811EE26C /* RecoveryPocket/CoachCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23C71E09E6C4C8CBA7F1B07 /* RecoveryPocket/CoachCore.swift */; };
+		7453B19E6A4440B9B79F7219 /* RecoveryPocket/CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0E2B3FDE394BEB97BEADD4 /* RecoveryPocket/CoachView.swift */; };
+		91ED4E084F0E474192046CC1 /* RecoveryPocket/EnergyInsightsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F52535B512074748B311A328 /* RecoveryPocket/EnergyInsightsCore.swift */; };
+		5EC98A6E6DE548A4BBA1067C /* RecoveryPocket/EnergyInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2BCE078886C46D8913AEC30 /* RecoveryPocket/EnergyInsightsView.swift */; };
+		835A455BD7B4439FB197D26A /* RecoveryPocket/DecisionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9104074E60D0411B9F78D409 /* RecoveryPocket/DecisionCore.swift */; };
+		6D6EE007070B4429964584E6 /* RecoveryPocket/WellnessCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B278BE09F1F145FBA9C4D495 /* RecoveryPocket/WellnessCore.swift */; };
+		F8D3045420AD42488B450E30 /* RecoveryPocket/WellnessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1801945D5E1741638D6CB6F6 /* RecoveryPocket/WellnessViews.swift */; };
+		C8615D93209A1B958DE1EFB5 /* RecoveryPocket/EnergyBudgetCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBD4836AFFCE524F1E2538EA /* RecoveryPocket/EnergyBudgetCore.swift */; };
+		0143DF3815F726EAAAA446C4 /* RecoveryPocket/EnergyBudgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928387DDE2F284984B9CDF23 /* RecoveryPocket/EnergyBudgetView.swift */; };
+		B41111111111111111111111 /* IntegratedCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241111111111111111111111; };
+		B42222222222222222222222 /* IntegratedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242222222222222222222222; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +121,17 @@
 		D959E37F8DBB774EF87E4BB4 /* Shared/WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/WatchBridge.swift; sourceTree = "<group>"; };
 		EE05B3AE58AE3B7EC0A4FB27 /* RecoveryPocket/RecoveryPocketApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/RecoveryPocketApp.swift; sourceTree = "<group>"; };
 		F46EE68D33E4731FBB880916 /* RecoveryWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = RecoveryWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A23C71E09E6C4C8CBA7F1B07 /* RecoveryPocket/CoachCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/CoachCore.swift; sourceTree = "<group>"; };
+		AA0E2B3FDE394BEB97BEADD4 /* RecoveryPocket/CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/CoachView.swift; sourceTree = "<group>"; };
+		F52535B512074748B311A328 /* RecoveryPocket/EnergyInsightsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/EnergyInsightsCore.swift; sourceTree = "<group>"; };
+		F2BCE078886C46D8913AEC30 /* RecoveryPocket/EnergyInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/EnergyInsightsView.swift; sourceTree = "<group>"; };
+		9104074E60D0411B9F78D409 /* RecoveryPocket/DecisionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/DecisionCore.swift; sourceTree = "<group>"; };
+		B278BE09F1F145FBA9C4D495 /* RecoveryPocket/WellnessCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/WellnessCore.swift; sourceTree = "<group>"; };
+		1801945D5E1741638D6CB6F6 /* RecoveryPocket/WellnessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/WellnessViews.swift; sourceTree = "<group>"; };
+		FBD4836AFFCE524F1E2538EA /* RecoveryPocket/EnergyBudgetCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/EnergyBudgetCore.swift; sourceTree = "<group>"; };
+		928387DDE2F284984B9CDF23 /* RecoveryPocket/EnergyBudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/EnergyBudgetView.swift; sourceTree = "<group>"; };
+		241111111111111111111111 /* IntegratedCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/IntegratedCore.swift; sourceTree = "<group>"; };
+		242222222222222222222222 /* IntegratedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPocket/IntegratedViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -159,6 +181,17 @@
 			isa = PBXGroup;
 			children = (
 				6C36FFE920F24CEDB7CFDBFC /* Assets.xcassets */,
+				A23C71E09E6C4C8CBA7F1B07 /* RecoveryPocket/CoachCore.swift */,
+				AA0E2B3FDE394BEB97BEADD4 /* RecoveryPocket/CoachView.swift */,
+				1801945D5E1741638D6CB6F6 /* RecoveryPocket/WellnessViews.swift */,
+				928387DDE2F284984B9CDF23 /* RecoveryPocket/EnergyBudgetView.swift */,
+				FBD4836AFFCE524F1E2538EA /* RecoveryPocket/EnergyBudgetCore.swift */,
+				B278BE09F1F145FBA9C4D495 /* RecoveryPocket/WellnessCore.swift */,
+				242222222222222222222222 /* IntegratedViews.swift */,
+				241111111111111111111111 /* IntegratedCore.swift */,
+				9104074E60D0411B9F78D409 /* RecoveryPocket/DecisionCore.swift */,
+				F2BCE078886C46D8913AEC30 /* RecoveryPocket/EnergyInsightsView.swift */,
+				F52535B512074748B311A328 /* RecoveryPocket/EnergyInsightsCore.swift */,
 				977D13A95C8A7DEF52C4CF0D /* RecoveryPocket/BatteryHome.swift */,
 				6E2F0CBB7F4A99E681C2B4E5 /* RecoveryPocket/ContentView.swift */,
 				BC4F3D4A92896D4EBD1517B1 /* RecoveryPocket/HealthStore.swift */,
@@ -331,6 +364,17 @@
 			files = (
 				357EFE1D486781BC42FB667A /* RecoveryPocket/RecoveryPocketApp.swift in Sources */,
 				BB2A65C83BF3F70A80ADBC52 /* RecoveryPocket/ContentView.swift in Sources */,
+				B035534B1A9C4978811EE26C /* RecoveryPocket/CoachCore.swift in Sources */,
+				7453B19E6A4440B9B79F7219 /* RecoveryPocket/CoachView.swift in Sources */,
+				F8D3045420AD42488B450E30 /* RecoveryPocket/WellnessViews.swift in Sources */,
+				0143DF3815F726EAAAA446C4 /* RecoveryPocket/EnergyBudgetView.swift in Sources */,
+				C8615D93209A1B958DE1EFB5 /* RecoveryPocket/EnergyBudgetCore.swift in Sources */,
+				6D6EE007070B4429964584E6 /* RecoveryPocket/WellnessCore.swift in Sources */,
+				B42222222222222222222222 /* IntegratedViews.swift in Sources */,
+				B41111111111111111111111 /* IntegratedCore.swift in Sources */,
+				835A455BD7B4439FB197D26A /* RecoveryPocket/DecisionCore.swift in Sources */,
+				5EC98A6E6DE548A4BBA1067C /* RecoveryPocket/EnergyInsightsView.swift in Sources */,
+				91ED4E084F0E474192046CC1 /* RecoveryPocket/EnergyInsightsCore.swift in Sources */,
 				337D58D7B0992EC31D38DCBE /* RecoveryPocket/BatteryHome.swift in Sources */,
 				5AC7C54E71F9D6DD55CD798C /* RecoveryPocket/HealthStore.swift in Sources */,
 				194A7CCA4F13CF008DE83F2D /* RecoveryPocket/RecoveryEngine.swift in Sources */,
@@ -391,7 +435,6 @@
 				CODE_SIGN_ENTITLEMENTS = WatchApp/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp;
@@ -414,7 +457,6 @@
 				CODE_SIGN_ENTITLEMENTS = RecoveryPocket/RecoveryPocket.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RecoveryPocket/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -443,7 +485,6 @@
 				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Widgets/Watch-Info.plist";
 				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp.widgets;
@@ -466,7 +507,6 @@
 				CODE_SIGN_ENTITLEMENTS = WatchApp/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp;
@@ -489,7 +529,6 @@
 				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Widgets/Watch-Info.plist";
 				PRODUCT_BUNDLE_IDENTIFIER = studio.rfg.recoverypocket.watchkitapp.widgets;
@@ -518,7 +557,6 @@
 				CODE_SIGN_ENTITLEMENTS = RecoveryPocket/RecoveryPocket.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RecoveryPocket/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -541,7 +579,6 @@
 				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Widgets/iOS-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -564,7 +601,6 @@
 				CODE_SIGN_ENTITLEMENTS = Widgets/Widgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Widgets/iOS-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

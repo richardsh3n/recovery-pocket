@@ -13,7 +13,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.0</string>
+	<string>0.33.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -24,11 +24,11 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>33</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>读取你的睡眠、HRV、心率、静息心率、活动能量、训练、步数、正念时段、呼吸率、睡眠腕温与血氧记录，在本机展示数据覆盖情况并计算实验性恢复参考。健康数据不会上传。</string>
+	<string>只读睡眠、HRV、心率、活动和静息能量、训练及身体指标；可选读取体重、体脂、去脂体重、身高和饮食能量，在本机展示每日能量收支。原始健康记录不上传。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -40,5 +40,7 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>连接你配对的 Mac，让它通过你已登录的 Codex 处理经你确认的健康摘要与问题。</string>
 </dict>
 </plist>

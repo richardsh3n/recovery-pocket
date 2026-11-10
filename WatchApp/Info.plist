@@ -13,14 +13,23 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.0</string>
+	<string>0.33.0</string>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>33</string>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>studio.rfg.recoverypocket</string>
 	<key>WKRunsIndependentlyOfCompanionApp</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>recoverypocket</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

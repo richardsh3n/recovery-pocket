@@ -10,3 +10,12 @@ build/
 .env*
 DeviceReview/
 ProductReview/
+*.provisionprofile
+*.p8
+*.key
+*.pem
+*.xcarchive
+*.xcresult
+__pycache__/
+pairing.json
+credentials.json

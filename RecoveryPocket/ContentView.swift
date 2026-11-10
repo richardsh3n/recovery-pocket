@@ -89,15 +89,18 @@ struct ContentView: View {
                             Text("30 天数据覆盖").font(.headline)
                             ForEach(snapshot.coverage) { row in
                                 VStack(alignment: .leading, spacing: 5) {
-                                    HStack { Text(row.name).font(.subheadline); Spacer(); Text("\(row.days) 天 · \(row.count) 条").font(.caption).foregroundStyle(tint) }
-                                    Text(row.sources.isEmpty ? "没有可读记录；无法区分未授权与未记录" : row.sources.joined(separator: "\n")).font(.caption2).foregroundStyle(.secondary)
+                                    HStack { Text(row.name).font(.subheadline); Spacer(); Text(row.readFailure != nil ? "读取失败" : "\(row.days) 天 · \(row.count) 条").font(.caption).foregroundStyle(tint) }
+                                    Text(row.readFailure ?? (row.sources.isEmpty ? "没有可读记录；无法区分未授权与未记录" : row.sources.joined(separator: "\n"))).font(.caption2).foregroundStyle(.secondary)
                                     if let date = row.lastSample { Text("最新记录：\(date.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary) }
                                 }.padding(.vertical, 5)
                             }
-                            Text("睡眠、HRV 和心率优先选 Apple Watch，并各自使用记录最多的单一来源。覆盖天数按记录起始日期计；夜间有效性以恢复模型检查为准。")
+                            Text("睡眠、HRV 和心率优先选 Apple Watch，并各自使用近期覆盖优先的单一来源。覆盖天数按记录起始日期计；夜间有效性以恢复模型检查为准。")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
-                        Text("最后成功读取：\(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                        if let failures = snapshot.readFailures, !failures.isEmpty {
+                            Text("部分类型读取失败，空白不代表没有记录：\n"+failures.joined(separator:"\n")).font(.caption).foregroundStyle(.orange)
+                        }
+                        Text("本次读取：\(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if let notice = health.notice {
@@ -138,7 +141,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("睡眠目标") {
-                    Stepper("每晚 \(String(format: "%.1f", sleepTarget)) 小时", value: $sleepTarget, in: 6...10, step: 0.5)
+                    Stepper("每晚 \(String(format: "%.1f", sleepTarget)) 小时", value: $sleepTarget, in: 4...12, step: 0.5)
                     Text("这是你设置的目标，模型不会把长期睡眠不足当作理想状态。").font(.caption)
                 }
                 Section("健康数据权限") {

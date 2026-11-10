@@ -151,7 +151,7 @@ let noBaselineRest = BatteryModel.calculate(hours: [restHour], anchor: 50, basel
 check(noBaselineRest.value != nil && noBaselineRest.value! <= 50, "missing HR baseline never invents awake recovery")
 let partialNight = NightRecord(date: date, sleepHours: 7, hrv: nil, heartRate: nil, hrvCount: 0, heartRateCount: 0)
 let preliminary = RecoveryModelV2.calculate(days: [RecoveryDay(night: partialNight, activeKcal: nil, sleepMidpointHour: nil)]).last!
-check(preliminary.score != nil && preliminary.reliability.contains("初步估计"), "one recorded night provides explicitly preliminary recovery")
+check(preliminary.score == nil && preliminary.sleepCompletion != nil && preliminary.reliability.contains("初步估计"), "one recorded night preserves sleep without an invented recovery score")
 let emptyNight = NightRecord(date: date, sleepHours: nil, hrv: nil, heartRate: nil, hrvCount: 0, heartRateCount: 0)
 check(RecoveryModelV2.calculate(days: [RecoveryDay(night: emptyNight, activeKcal: nil, sleepMidpointHour: nil)]).last?.score == nil, "no records still cannot produce recovery")
 let optionalLedger = BatteryLedger(baselineHR: nil, hours: [sleepHour])
@@ -206,7 +206,7 @@ check(DayHRVModel.compare(priorQuiet + [currentQuiet,hrvRow(1)],now:hrvNow,calen
 let eligibleRow = compared.last!
 check(abs(DayHRVModel.observedHours([eligibleRow,eligibleRow],start:hrvDay,end:hrvNow) - 1.0/60) < 0.00001, "duplicate HRV intervals cannot inflate observed minutes")
 var longHRV = eligibleRow; longHRV.end = longHRV.start.addingTimeInterval(3600)
-check(DayHRVModel.observedHours([longHRV],start:hrvDay,end:hrvNow) == 5.0/60, "HRV influence capped at actual short observation window")
+check(DayHRVModel.observedHours([longHRV],start:hrvDay,end:hrvNow) == 0, "unsupported HRV duration does not establish short-record coverage")
 check(DayHRVModel.summary(compared,now:hrvDay.addingTimeInterval(86400),calendar:testCalendar) == nil, "yesterday HRV not presented as today's summary")
 var baselineDaytime = restHour; baselineDaytime.heartRateCount = 2; baselineDaytime.heartRateCoverageHours = 0
 var sparseDaytime = baselineDaytime; sparseDaytime.awakeHRVZ = -3; sparseDaytime.awakeHRVObservedHours = 1.0/60
@@ -277,9 +277,39 @@ print("105 checks total; synthetic regressions, not physiological validation.")
 let calorieOnly = BatteryHour(start:hStart,end:clock,sleepHours:0,activeKcal:35,heartRate:nil,heartRateCount:0)
 let calorieEstimate = BatteryModel.calculate(hours:[calorieOnly],anchor:50,baselineHR:nil,now:clock)
 check(abs(calorieEstimate.points.last!.value! - 49) < 0.00001,"hourly calories add activity cost without inventing one hour of wakefulness")
-check(calorieEstimate.inputs?.unobservedHours == 1,"calorie-only bins retain their missing time coverage")
+check(calorieEstimate.inputs?.unobservedHours == clock.timeIntervalSince(Calendar.current.startOfDay(for:clock))/3600,"calorie-only bins retain missing coverage including earlier hours")
 var zeroEnergy = calorieOnly; zeroEnergy.activeKcal = 0
 check(BatteryModel.calculate(hours:[zeroEnergy],anchor:50,baselineHR:nil,now:clock).value == nil,"zero energy without HR or sleep cannot establish an observed reserve")
 check(calorieEstimate.dataNote(at:clock)?.contains("未读到睡眠") == true,"missing sleep is communicated as a reading gap rather than failed recovery")
 check(fullRecovery.inputs?.latestSleepEnd == clock,"latest recorded sleep coverage is carried into calculation evidence")
 print("110 checks total; synthetic regressions, not physiological validation.")
+
+// Load / strain numerics (Shared/StrainEngine). Synthetic fixtures only.
+check(StrainEngine.strain(kcal: nil, workoutMinutes: 0) == nil, "missing active energy yields no strain instead of zero")
+check(StrainEngine.strain(kcal: -5, workoutMinutes: 0) == nil, "negative energy is rejected")
+let restStrain = StrainEngine.strain(kcal: 60, workoutMinutes: 0)!
+let hardStrain = StrainEngine.strain(kcal: 900, workoutMinutes: 70)!
+check(restStrain < hardStrain, "more recorded energy raises strain")
+check((0...StrainEngine.ceiling).contains(hardStrain), "strain stays within the 0-21 ceiling")
+check(abs(StrainEngine.strain(kcal: 900, workoutMinutes: 40)! - StrainEngine.strain(kcal: 900, workoutMinutes: 40)!) < 1e-12, "strain is deterministic for the same input")
+check(StrainEngine.zone(restStrain) == "轻", "low strain reads as light")
+check(StrainEngine.zone(StrainEngine.ceiling) == "极限", "ceiling strain reads as maximal")
+
+// ACWR: acute/chronic over recorded days only; missing days are never zero.
+let loadCalendar = Calendar(identifier: .gregorian)
+let loadNow = loadCalendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+func loadRow(_ offset: Int, _ kcal: Double?) -> LoadBarRow {
+    LoadBarRow(day: loadCalendar.date(byAdding: .day, value: -offset, to: loadNow)!, kcal: kcal)
+}
+let steadyLoad = (0..<28).map { loadRow($0, 400) }
+let steadyRatio = StrainEngine.acwr(daily: steadyLoad, now: loadNow, calendar: loadCalendar)
+check(steadyRatio.ratio != nil && abs(steadyRatio.ratio! - 1.0) < 0.0001, "constant load gives an ACWR of 1")
+check(steadyRatio.zone == "接近历史", "constant load sits in the steady zone")
+let spiking = (7..<28).map { loadRow($0, 300) } + (0..<7).map { loadRow($0, 700) }
+check(StrainEngine.acwr(daily: spiking, now: loadNow, calendar: loadCalendar).ratio! > steadyRatio.ratio!, "a recent load spike raises the ratio")
+let sparseLoad = (0..<5).map { loadRow($0, 400) }
+check(StrainEngine.acwr(daily: sparseLoad, now: loadNow, calendar: loadCalendar).ratio == nil, "insufficient history refuses an ACWR")
+let withGaps = (1...28).map { loadRow($0, $0 % 2 == 1 ? 400 : nil) }
+let gapRatio = StrainEngine.acwr(daily: withGaps, now: loadNow, calendar: loadCalendar)
+check(gapRatio.ratio != nil && abs(gapRatio.ratio! - 1.0) < 0.0001, "missing days are excluded rather than counted as zero")
+print("122 checks total; strain/load numerics are synthetic regressions, not physiological validation.")

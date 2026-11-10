@@ -12,7 +12,51 @@ struct NightRecord: Codable, Identifiable {
     var heartRate: Double?
     var hrvCount: Int
     var heartRateCount: Int
+    // Optional for old caches; unknown sources only compare with unknown sources.
+    var hrvSourceKey: String? = nil
+    var heartRateSourceKey: String? = nil
+    var hrvDurationBucket: Int? = nil
+    var sleepStartedAt:Date? = nil
+    var sleepEndedAt:Date? = nil
+    var sleepTimeZone:String? = nil
     var id: Date { date }
+}
+
+/// One comparison policy shared by morning recovery and training follow-up.
+/// Unknown legacy source keys compare only with unknown keys and stay preliminary.
+enum NightlyComparison {
+    enum Channel { case hrv, heartRate }
+    static func usableSleep(_ n:NightRecord) -> Bool { n.sleepHours.map { $0.isFinite && $0 > 0 && $0 <= 18 } == true }
+    static func hrvValue(_ n:NightRecord) -> Double? {
+        guard n.hrvCount > 0 else { return nil }
+        return n.hrv.flatMap { $0.isFinite && $0 > 0 && $0 < 1000 ? $0 : nil }
+    }
+    static func matches(_ candidate:NightRecord,_ reference:NightRecord,channel:Channel) -> Bool {
+        guard usableSleep(candidate) else { return false }
+        switch channel {
+        case .hrv:
+            return candidate.hrvSourceKey == reference.hrvSourceKey && candidate.hrvDurationBucket == reference.hrvDurationBucket && hrvValue(candidate) != nil
+        case .heartRate:
+            return candidate.heartRateSourceKey == reference.heartRateSourceKey && candidate.heartRateCount >= 2 && candidate.heartRate.map { $0.isFinite && (25...150).contains($0) } == true
+        }
+    }
+    static func history(for reference:NightRecord,in input:[NightRecord],channel:Channel,days:Int,before:Date? = nil,calendar:Calendar = .current) -> [NightRecord] {
+        let boundary=calendar.startOfDay(for:before ?? reference.date)
+        let start=calendar.date(byAdding:.day,value:-max(0,days),to:calendar.startOfDay(for:reference.date))!
+        let rows=input.filter { $0.date >= start && $0.date < boundary && matches($0,reference,channel:channel) }
+        let grouped=Dictionary(grouping:rows,by:{ calendar.startOfDay(for:$0.date) })
+        return grouped.keys.sorted().compactMap { day in
+            grouped[day]!.sorted { a,b in
+                let aCount=channel == .hrv ? a.hrvCount : a.heartRateCount
+                let bCount=channel == .hrv ? b.hrvCount : b.heartRateCount
+                if aCount != bCount { return aCount > bCount }
+                let av=channel == .hrv ? a.hrv ?? 0 : a.heartRate ?? 0
+                let bv=channel == .hrv ? b.hrv ?? 0 : b.heartRate ?? 0
+                if av != bv { return av < bv }
+                return a.date < b.date
+            }.first
+        }
+    }
 }
 
 struct RecoveryResult {
@@ -72,7 +116,7 @@ enum RecoveryEngine {
         }
         let hrvZ = robustZ(log(hrv), against: baseline.compactMap { $0.hrv.map(log) }, floor: 0.15)
         let hrZ = robustZ(hr, against: baseline.compactMap(\.heartRate), floor: 3)
-        let target = sleepTarget.isFinite ? max(6, min(10, sleepTarget)) : 8
+        let target = sleepTarget.isFinite ? max(4, min(12, sleepTarget)) : 8
         let sleepPart = max(0, min(100, 100 * sleep / target))
         let hrvPart = max(0, min(100, 65 + 17.5 * hrvZ))
         let heartPart = max(0, min(100, 65 - 17.5 * hrZ))

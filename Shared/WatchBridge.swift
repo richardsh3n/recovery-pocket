@@ -6,12 +6,25 @@ import WatchConnectivity
     static let shared = WatchBridge()
     @Published var status = StatusStore.read()
     @Published var connection = "等待同步"
+    var actionTitle:String?
+    var actionDate:Date?
+    @Published var inbox:[WatchCheckIn] = []
+    private var inboxURL:URL {FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("pocket-watch-inbox.json")}
+    private func persistInbox(){try? FileManager.default.createDirectory(at:inboxURL.deletingLastPathComponent(),withIntermediateDirectories:true);if let data=try? JSONEncoder().encode(inbox){try? data.write(to:inboxURL,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication])}}
+    func acknowledge(_ id:UUID){inbox.removeAll{$0.id == id};persistInbox()}
+    func sendCheckIn(energy:Int){
+        guard !status.demo else{connection="演示模式不发送真实自评";return}
+        let row=WatchCheckIn(date:Date(),energy:energy)
+        guard row.valid(now:Date()),WCSession.isSupported(),WCSession.default.activationState == .activated,let data=try? JSONEncoder().encode(row) else{connection="请等待手表与手机连接后重试";return}
+        WCSession.default.transferUserInfo(["checkin":data]);connection="已交给系统传送，待 iPhone 接收"
+    }
     var presentationOverride: PocketStatus?
     func publishHealth(_ value: PocketStatus) { publish(presentationOverride ?? value) }
     private override init() {
         super.init()
         #if os(iOS)
         if status.demo { status = .empty }
+        inbox=(try? JSONDecoder().decode([WatchCheckIn].self,from:Data(contentsOf:inboxURL))) ?? []
         #endif
         if WCSession.isSupported() { WCSession.default.delegate = self; WCSession.default.activate() }
     }
@@ -21,6 +34,7 @@ import WatchConnectivity
         // Sequence presentation changes (including clearing demo) by publication time.
         // measuredAt remains untouched, so republishing cannot make old observations fresh.
         value.computedAt = Date()
+        value.actionTitle=actionTitle;value.actionDate=actionDate
         #endif
         status = value
         let saved = StatusStore.save(value)
@@ -50,6 +64,12 @@ import WatchConnectivity
             self.publish(self.status)
             #endif
         }
+    }
+    nonisolated func session(_ session:WCSession,didReceiveUserInfo userInfo:[String:Any]) {
+        #if os(iOS)
+        guard let data=userInfo["checkin"] as? Data,data.count < 10000,let row=try? JSONDecoder().decode(WatchCheckIn.self,from:data),row.valid(now:Date()) else{return}
+        Task{@MainActor in if !self.inbox.contains(where:{$0.id == row.id}){self.inbox.append(row);self.persistInbox()}}
+        #endif
     }
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         #if os(watchOS)
